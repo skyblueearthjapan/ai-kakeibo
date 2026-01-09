@@ -506,8 +506,8 @@ function getDashboard(monthStart, opts) {
     const ms = normalizeMonthStart_(monthStart);
     const o = opts || {};
 
-    // 遅延起票: 固定費が未起票なら起票（表示月のみ）
-    ensureFixedCostsPostedForMonth_(ms);
+    // 方針A: 固定費は07_FixedCostsマスターから直接読む（取引行を作らない）
+    // ensureFixedCostsPostedForMonth_(ms) は使用しない
 
     const txns = getAllTransactionsAsObjects_(traceId);
     const dashboard = buildDashboard_(txns, ms, { includeUnconfirmed: !!o.includeUnconfirmed });
@@ -564,8 +564,8 @@ function getInsights(monthStart, opts) {
   try {
     const ms = normalizeMonthStart_(monthStart);
 
-    // 遅延起票: 固定費が未起票なら起票（表示月のみ）
-    ensureFixedCostsPostedForMonth_(ms);
+    // 方針A: 固定費は07_FixedCostsマスターから直接読む（取引行を作らない）
+    // ensureFixedCostsPostedForMonth_(ms) は使用しない
 
     const txns = getAllTransactionsAsObjects_(traceId);
 
