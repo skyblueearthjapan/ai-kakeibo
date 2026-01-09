@@ -3,45 +3,51 @@
  * 書き込み先は 04_Transactions のみ（設計仕様準拠）
  */
 
-function appendTransactionRow_(mappedRow, traceId) {
-  return withSheetLock_(() => {
-    const sheet = getSheetByName_("04_Transactions");
+/**
+ * ヘッダ駆動でappend（列ズレ根絶版）
+ * rowObjのキーがヘッダ名と一致すれば書き込み、なければ空
+ */
+function appendTransactionRow_(rowObj, traceId) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName("04_Transactions");
+  if (!sh) {
+    throw makeAppError_("E_SHEET_WRITE_FAILED", "04_Transactions not found", traceId, true,
+      "保存に失敗しました（シートが見つかりません）。");
+  }
 
-    // 列順 A..Q（data-dictionary.md準拠）
-    const row = [
-      mappedRow.id,                   // A id
-      mappedRow.date || "",           // B date
-      mappedRow.type || "",           // C type
-      mappedRow.account || "",        // D account
-      mappedRow.merchant || "",       // E merchant
-      mappedRow.item || "",           // F item
-      mappedRow.category || "",       // G category
-      mappedRow.subcategory || "",    // H subcategory
-      mappedRow.payment_method || "", // I payment_method
-      mappedRow.amount || 0,          // J amount
-      mappedRow.memo || "",           // K memo
-      mappedRow.tags || "",           // L tags
-      mappedRow.source || "",         // M source
-      mappedRow.confidence || "",     // N confidence
-      mappedRow.receipt_file_id || "",// O receipt_file_id
-      mappedRow.raw_text || "",       // P raw_text
-      mappedRow.status || ""          // Q status
-    ];
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
 
-    try {
-      sheet.appendRow(row);
-    } catch (e) {
-      throw makeAppError_(
-        "E_SHEET_WRITE_FAILED",
-        `appendRow failed: ${e}`,
-        traceId,
-        true,
-        "保存に失敗しました。もう一度お試しください。"
-      );
+  try {
+    const lastCol = sh.getLastColumn();
+    const header = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim());
+
+    // header駆動でvaluesを作る（列ズレ根絶）
+    const values = header.map((h) => {
+      if (!h) return "";
+      const v = rowObj[h];
+      if (v === undefined || v === null) return "";
+      if (Array.isArray(v)) return v.join(",");
+      return v;
+    });
+
+    // idが必要なら必ず付与
+    const idIdx = header.indexOf("id");
+    if (idIdx >= 0 && !values[idIdx]) {
+      values[idIdx] = generateTransactionId_();
     }
 
-    return mappedRow.id;
-  });
+    // デバッグログ
+    console.log(`[WRITE] trace=${traceId} headerCols=${header.length} valuesLen=${values.length}`);
+
+    sh.appendRow(values);
+    return idIdx >= 0 ? String(values[idIdx]) : "";
+  } catch (e) {
+    throw makeAppError_("E_SHEET_WRITE_FAILED", `append failed: ${e}`, traceId, true,
+      "保存に失敗しました。もう一度お試しください。");
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function getSheetByName_(name) {

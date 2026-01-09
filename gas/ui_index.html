@@ -21,67 +21,48 @@
     <button class="tab" data-tab="analytics" onclick="switchTab('analytics')">分析</button>
   </nav>
 
-  <!-- ホームタブ：カメラ/音声/フォーム統合 -->
+  <!-- ホームタブ：AI統合入力 -->
   <main id="tab-home" class="wrap tab-content active">
-    <!-- ===== AI受付（Home） ===== -->
-    <section class="card pastel-mint" id="aiReceptionCard">
-      <h3>かんたん入力（AI）</h3>
+    <!-- ===== AIチャット受付 ===== -->
+    <section class="card pastel-mint" id="aiChatCard">
+      <h3>AI受付（話しかけて入力）</h3>
 
-      <div class="row">
-        <textarea id="smartText" rows="3" placeholder="例：すき家 2000円 / 昨日 スタバ 620円 / 食材 2300円"></textarea>
+      <div class="chatBox" id="chatBox"></div>
+
+      <div class="chatRow">
+        <textarea id="chatInput" rows="2" placeholder="例：すき家 2000円 現金 / 交通費 180円 suica"></textarea>
+        <button class="assistBtn primary chatSendBtn" type="button" onclick="sendChat_()">送信</button>
       </div>
 
       <div class="row actions">
-        <button class="assistBtn primary" type="button" onclick="runSmartInput_()">AIで解析</button>
         <button class="assistBtn secondary" type="button" onclick="checkAiStatus_()">AI状態</button>
+        <div id="aiStatus" class="hint"></div>
       </div>
 
-      <div id="aiStatus" class="hint"></div>
-    </section>
-
-    <!-- ===== プレビュー ===== -->
-    <section class="card pastel-purple" id="previewCard" style="display:none;">
-      <h3>AIプレビュー</h3>
-      <div id="previewBody" class="previewBody"></div>
       <div class="row actions">
-        <button class="assistBtn primary" type="button" onclick="acceptPreview_()">この内容でOK（フォームに反映）</button>
-        <button class="assistBtn secondary" type="button" onclick="hidePreview_()">やり直す</button>
+        <label class="assistBtn primary">
+          📷 カメラ
+          <input id="receiptCam" type="file" accept="image/*" capture="environment" hidden />
+        </label>
+        <label class="assistBtn secondary">
+          🖼 写真
+          <input id="receiptPick" type="file" accept="image/*" hidden />
+        </label>
+        <button class="assistBtn mic" id="btnMic" type="button">🎤 音声</button>
       </div>
-      <div class="hint" id="previewHint"></div>
+
+      <div class="hint">※ AIが提案 → OKで取引フォームに反映します</div>
     </section>
-    <!-- ===== /AI受付 ===== -->
 
-    <!-- かんたん入力（カメラ/写真/音声） -->
-    <section class="card pastel-blue" id="inputAssistCard">
-      <h3>📷🎤 補助入力</h3>
-
-      <!-- Camera -->
-      <label class="assistBtn primary">
-        <span class="assistBtn-icon">📷</span> カメラで撮影
-        <input id="receiptCam" type="file" accept="image/*" capture="environment" hidden />
-      </label>
-
-      <!-- Picker -->
-      <label class="assistBtn secondary">
-        <span class="assistBtn-icon">🖼</span> 写真から選ぶ
-        <input id="receiptPick" type="file" accept="image/*" hidden />
-      </label>
-
-      <!-- Voice -->
-      <button class="assistBtn mic" id="btnMic" type="button">
-        <span class="assistBtn-icon">🎤</span> 音声で入力
-      </button>
-
-      <!-- Voice Result -->
-      <div class="voiceBox" id="voiceBox" style="display:none;">
-        <textarea id="voiceText" rows="3" placeholder="音声認識結果が表示されます（編集できます）"></textarea>
-        <div class="voiceActions">
-          <button class="btn primary" type="button" onclick="applyVoiceToForm_()">フォームに反映</button>
-          <button class="btn secondary" type="button" onclick="clearVoice_()">クリア</button>
-        </div>
+    <!-- ===== AIプレビュー ===== -->
+    <section class="card pastel-purple" id="aiPreviewCard" style="display:none;">
+      <h3>AIの提案</h3>
+      <div id="aiPreviewBody" class="previewBody"></div>
+      <div class="row actions">
+        <button class="assistBtn primary" type="button" onclick="acceptAiDraft_()">この内容でOK（フォームに反映）</button>
+        <button class="assistBtn secondary" type="button" onclick="retryAi_()">やり直す</button>
       </div>
-
-      <div id="ocrStatus" class="hint"></div>
+      <div class="hint" id="aiPreviewHint"></div>
     </section>
 
     <!-- 入力フォーム -->

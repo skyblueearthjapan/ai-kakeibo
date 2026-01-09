@@ -828,4 +828,67 @@
   .pastel-purple {
     background: linear-gradient(135deg, #E9D5FF 0%, #F3E8FF 100%);
   }
+
+  /* ========== AIチャット ========== */
+
+  .chatBox {
+    background: #fff;
+    border: 1px solid rgba(17, 24, 39, 0.12);
+    border-radius: 14px;
+    padding: 10px;
+    min-height: 90px;
+    max-height: 220px;
+    overflow: auto;
+  }
+
+  .msg {
+    margin: 8px 0;
+    display: flex;
+  }
+
+  .msg.user {
+    justify-content: flex-end;
+  }
+
+  .bubble {
+    max-width: 80%;
+    padding: 10px 12px;
+    border-radius: 14px;
+    line-height: 1.6;
+    font-weight: 700;
+    font-size: 14px;
+  }
+
+  .msg.user .bubble {
+    background: #111827;
+    color: #fff;
+  }
+
+  .msg.ai .bubble {
+    background: #EEF2FF;
+    color: #111827;
+  }
+
+  .chatRow {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  #chatInput {
+    flex: 1;
+    border-radius: 14px;
+    padding: 10px;
+    border: 1px solid rgba(17, 24, 39, 0.15);
+    font-size: 15px;
+    min-height: 50px;
+    resize: none;
+  }
+
+  .chatSendBtn {
+    width: 70px;
+    height: auto;
+    margin-top: 0;
+    padding: 10px;
+  }
 </style>

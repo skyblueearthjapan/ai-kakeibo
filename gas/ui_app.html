@@ -242,8 +242,13 @@
     if ($("inputMemo")) $("inputMemo").value = "";
     if ($("receiptCam")) $("receiptCam").value = "";
     if ($("receiptPick")) $("receiptPick").value = "";
+    if ($("chatInput")) $("chatInput").value = "";
+    // チャット履歴はクリアしない（ユーザー体験維持）
+    // AIプレビューを非表示
+    const previewCard = $("aiPreviewCard");
+    if (previewCard) previewCard.style.display = "none";
+    LAST_AI_DRAFT = null;
     setOcrStatus("", "");
-    clearVoice_();
   }
 
   /* ========== 音声入力 ========== */
@@ -252,7 +257,7 @@
   let listening = false;
 
   /**
-   * 音声入力のセットアップ
+   * 音声入力のセットアップ（チャット連携版）
    */
   function setupVoiceInput_() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -261,7 +266,7 @@
     if (!SR || !btn) {
       if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '<span class="assistBtn-icon">🎤</span> 音声入力（非対応）';
+        btn.textContent = "🎤 音声（非対応）";
       }
       return;
     }
@@ -271,35 +276,55 @@
     recognition.interimResults = true;
     recognition.continuous = false;
 
+    let finalText = "";
+
     recognition.onstart = () => {
       listening = true;
+      finalText = "";
       btn.classList.add("listening");
-      btn.innerHTML = '<span class="assistBtn-icon">⏺</span> 録音中...';
-      $("voiceBox").style.display = "block";
+      btn.textContent = "⏺ 録音中...";
+      pushChat_("user", "🎤 音声入力中…");
     };
 
     recognition.onresult = (e) => {
-      let text = "";
+      let interimText = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        text += e.results[i][0].transcript;
+        const transcript = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          finalText += transcript;
+        } else {
+          interimText += transcript;
+        }
       }
-      $("voiceText").value = text.trim();
+      // chatInputに途中結果を表示
+      $("chatInput").value = finalText + interimText;
     };
 
     recognition.onend = () => {
       listening = false;
       btn.classList.remove("listening");
-      btn.innerHTML = '<span class="assistBtn-icon">🎤</span> 音声で入力';
+      btn.textContent = "🎤 音声";
+
+      // 最後の「音声入力中…」を削除
+      removeLast_();
+
+      const text = (finalText || $("chatInput").value || "").trim();
+      if (text) {
+        $("chatInput").value = text;
+        sendChat_();
+      }
     };
 
     recognition.onerror = (e) => {
       listening = false;
       btn.classList.remove("listening");
-      btn.innerHTML = '<span class="assistBtn-icon">🎤</span> 音声で入力';
+      btn.textContent = "🎤 音声";
+      removeLast_();
+
       if (e.error === "not-allowed") {
-        setOcrStatus("マイク権限が必要です。ブラウザ設定をご確認ください。", "error");
-      } else {
-        setOcrStatus("音声入力に失敗しました", "error");
+        pushChat_("ai", "マイク権限が必要です。ブラウザ設定をご確認ください。");
+      } else if (e.error !== "aborted" && e.error !== "no-speech") {
+        pushChat_("ai", "音声入力に失敗しました。");
       }
     };
 
@@ -361,16 +386,15 @@
   }
 
   /**
-   * 音声認識結果をクリア
+   * 音声入力をクリア
    */
   function clearVoice_() {
-    if ($("voiceText")) $("voiceText").value = "";
-    if ($("voiceBox")) $("voiceBox").style.display = "none";
+    // 現在はchatInputを使用しているため特別な処理不要
   }
 
-  /* ========== AI受付 ========== */
+  /* ========== AIチャット受付 ========== */
 
-  let LAST_DRAFT = null;
+  let LAST_AI_DRAFT = null;
 
   /**
    * AI状態を確認
@@ -386,49 +410,95 @@
           return;
         }
         const r = res.result;
-        if (el) el.textContent = `AI_ENABLED=${r.aiEnabled} / KEY=${r.hasKey} / source=${r.keySource} / model=${r.modelText}`;
+        if (el) el.textContent = `AI=${r.aiEnabled} / KEY=${r.hasKey} / ${r.modelText}`;
       })
       .withFailureHandler((e) => {
-        if (el) el.textContent = "AI状態取得エラー: " + (e && e.message ? e.message : String(e));
+        if (el) el.textContent = "エラー: " + (e && e.message ? e.message : String(e));
       })
       .debugAiStatus();
   }
 
   /**
-   * Smart入力（AI解析）
+   * チャット送信
    */
-  function runSmartInput_() {
-    const t = ($("smartText")?.value || "").trim();
-    if (!t) {
-      setHomeStatus("入力してください");
-      return;
-    }
+  function sendChat_() {
+    const input = $("chatInput");
+    const text = (input?.value || "").trim();
+    if (!text) return;
 
-    setHomeStatus("AI解析中…");
+    pushChat_("user", text);
+    input.value = "";
+
+    pushChat_("ai", "解析中…");
 
     google.script.run
       .withSuccessHandler((res) => {
+        // 最後の「解析中…」を消す
+        removeLast_();
+
         if (!res || !res.ok) {
-          setHomeStatus("AI解析に失敗しました（手入力で続行できます）");
+          pushChat_("ai", "AI解析に失敗しました。手入力で続行できます。");
           return;
         }
-        LAST_DRAFT = res.result.draft;
-        showPreview_(LAST_DRAFT, res.result.aiUsed);
-        setHomeStatus("AIプレビューを確認してください");
+        LAST_AI_DRAFT = res.result.draft;
+        showAiPreview_(LAST_AI_DRAFT, res.result.aiUsed);
+        pushChat_("ai", buildAiSummary_(LAST_AI_DRAFT));
       })
       .withFailureHandler((e) => {
-        setHomeStatus("AI解析エラー: " + (e && e.message ? e.message : String(e)));
+        removeLast_();
+        pushChat_("ai", "AI解析エラー: " + (e && e.message ? e.message : String(e)));
       })
-      .processSmartInput(t, clientContext_());
+      .processSmartInput(text, clientContext_());
   }
 
   /**
-   * プレビュー表示
+   * チャットにメッセージ追加
    */
-  function showPreview_(draft, aiUsed) {
-    const card = $("previewCard");
-    const body = $("previewBody");
-    const hint = $("previewHint");
+  function pushChat_(role, text) {
+    const box = $("chatBox");
+    if (!box) return;
+
+    const wrap = document.createElement("div");
+    wrap.className = "msg " + role;
+
+    const b = document.createElement("div");
+    b.className = "bubble";
+    b.textContent = text;
+
+    wrap.appendChild(b);
+    box.appendChild(wrap);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  /**
+   * 最後のメッセージを削除
+   */
+  function removeLast_() {
+    const box = $("chatBox");
+    if (box && box.lastChild) {
+      box.removeChild(box.lastChild);
+    }
+  }
+
+  /**
+   * AI結果をサマリー文字列に
+   */
+  function buildAiSummary_(d) {
+    const parts = [];
+    if (d.merchant) parts.push(`店名: ${d.merchant}`);
+    if (d.amount) parts.push(`金額: ${d.amount}円`);
+    if (d.category) parts.push(`カテゴリ: ${d.category}`);
+    if (d.payment_method) parts.push(`支払: ${d.payment_method}`);
+    return parts.length ? parts.join(" / ") + "\n→「この内容でOK」を押してください" : "内容を確認してください";
+  }
+
+  /**
+   * AIプレビュー表示
+   */
+  function showAiPreview_(draft, aiUsed) {
+    const card = $("aiPreviewCard");
+    const body = $("aiPreviewBody");
+    const hint = $("aiPreviewHint");
 
     if (!card || !body) return;
 
@@ -447,7 +517,7 @@
 
     if (hint) {
       hint.textContent = aiUsed
-        ? "AI推定結果です。必要に応じて修正してください。"
+        ? "AI推定です。必要ならフォームで修正できます。"
         : "AI無効のため簡易推定です。フォームで修正してください。";
     }
 
@@ -456,26 +526,71 @@
   }
 
   /**
-   * プレビューを非表示
+   * AIプレビューやり直し
    */
-  function hidePreview_() {
-    const card = $("previewCard");
+  function retryAi_() {
+    const card = $("aiPreviewCard");
     if (card) card.style.display = "none";
+    LAST_AI_DRAFT = null;
   }
 
   /**
-   * プレビュー確定 -> フォームに反映
+   * AI確定 -> フォームに反映
    */
-  function acceptPreview_() {
-    if (!LAST_DRAFT) return;
-    applyDraftToHomeForm_(LAST_DRAFT);
-    hidePreview_();
+  function acceptAiDraft_() {
+    if (!LAST_AI_DRAFT) return;
+    applyDraftToHomeForm_(LAST_AI_DRAFT);
+
+    const card = $("aiPreviewCard");
+    if (card) card.style.display = "none";
 
     // フォーム位置へスクロール
     const formTop = $("inputDate") || document.body;
     formTop.scrollIntoView({ behavior: "smooth", block: "start" });
 
     setHomeStatus("フォームに反映しました。確認して「確定して保存」を押してください");
+  }
+
+  /**
+   * 写真/カメラ -> OCR -> AIへ送る
+   */
+  async function handleReceiptToAi_(file, source) {
+    if (!file) return;
+
+    pushChat_("user", source === "camera" ? "📷 レシート撮影" : "🖼 レシート選択");
+    pushChat_("ai", "OCR解析中…");
+
+    try {
+      const dataUrl = await resizeImageToDataUrl_(file, 1280, 0.75);
+
+      google.script.run
+        .withSuccessHandler((res) => {
+          removeLast_();
+
+          if (!res || !res.ok) {
+            pushChat_("ai", "OCRに失敗しました。手入力で続行できます。");
+            return;
+          }
+          const d = res.result.draft || {};
+          // OCR文字列をAIに渡す
+          const text = (d.raw_text || d.memo || "").trim();
+          if (!text) {
+            pushChat_("ai", "OCR結果が空でした。手入力で続行できます。");
+            return;
+          }
+          $("chatInput").value = text.slice(0, 800);
+          sendChat_();
+        })
+        .withFailureHandler((e) => {
+          removeLast_();
+          pushChat_("ai", "OCRエラー: " + (e && e.message ? e.message : String(e)));
+        })
+        .processReceiptV2(dataUrl, clientContext_());
+
+    } catch (e) {
+      removeLast_();
+      pushChat_("ai", "画像処理に失敗しました。");
+    }
   }
 
   /**
@@ -1013,11 +1128,17 @@
     if ($("inputDate")) $("inputDate").value = getTodayISO_();
     if ($("formDate")) $("formDate").value = getTodayISO_();
 
-    // カメラ/写真イベント
+    // カメラ/写真イベント -> AIチャットへ接続
     const cam = $("receiptCam");
     const pick = $("receiptPick");
-    if (cam) cam.addEventListener("change", () => handleReceiptFile_(cam.files[0], "camera"));
-    if (pick) pick.addEventListener("change", () => handleReceiptFile_(pick.files[0], "picker"));
+    if (cam) cam.addEventListener("change", () => {
+      handleReceiptToAi_(cam.files[0], "camera");
+      cam.value = "";
+    });
+    if (pick) pick.addEventListener("change", () => {
+      handleReceiptToAi_(pick.files[0], "picker");
+      pick.value = "";
+    });
 
     // 音声入力セットアップ
     setupVoiceInput_();
