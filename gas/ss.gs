@@ -69,21 +69,9 @@ function getSheetOrNull_(name) {
 /**
  * 初回セットアップ用: SPREADSHEET_IDをScript Propertiesにセット
  * Apps Scriptエディタで1回だけ実行してください
- *
- * 使い方:
- * 1. この関数内の "YOUR_SPREADSHEET_ID" を実際のスプレッドシートIDに置き換え
- * 2. Apps Scriptエディタで実行（権限承認が出る）
- * 3. Webアプリを再デプロイ
  */
 function setupSpreadsheetIdOnce_() {
-  // 保存先のスプレッドシートIDを入れてください
-  // URLの /d/ と /edit の間の部分がIDです
-  // 例: https://docs.google.com/spreadsheets/d/XXXXXXXXXXXXXXXXXX/edit
-  const SPREADSHEET_ID = "YOUR_SPREADSHEET_ID"; // ← ここを変更
-
-  if (SPREADSHEET_ID === "YOUR_SPREADSHEET_ID") {
-    throw new Error("SPREADSHEET_IDを実際の値に置き換えてから実行してください");
-  }
+  const SPREADSHEET_ID = "1a2rTbAwIBYfH0CstleN15VvUwk4AyisJJ3QFyok8uWY";
 
   PropertiesService.getScriptProperties().setProperty("SPREADSHEET_ID", SPREADSHEET_ID);
   console.log("SPREADSHEET_ID set successfully: " + SPREADSHEET_ID);
