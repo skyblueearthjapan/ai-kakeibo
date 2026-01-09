@@ -277,32 +277,25 @@
 
     recognition = new SR();
     recognition.lang = "ja-JP";
-    recognition.interimResults = true;
+    recognition.interimResults = false;  // 確定結果のみ取得（途中結果で揺れない）
     recognition.continuous = false;
-
-    let finalText = "";
 
     recognition.onstart = () => {
       listening = true;
-      finalText = "";
       btn.classList.add("listening");
       const labelEl = btn.querySelector(".voiceLabel");
       if (labelEl) labelEl.textContent = "録音中...";
-      pushChat_("user", "🎤 音声入力中…");
+      // chatInputをクリア
+      $("chatInput").value = "";
     };
 
     recognition.onresult = (e) => {
-      let interimText = "";
+      // 確定結果のみ取得
+      let finalText = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        const transcript = e.results[i][0].transcript;
-        if (e.results[i].isFinal) {
-          finalText += transcript;
-        } else {
-          interimText += transcript;
-        }
+        finalText += e.results[i][0].transcript;
       }
-      // chatInputに途中結果を表示
-      $("chatInput").value = finalText + interimText;
+      $("chatInput").value = finalText.trim();
     };
 
     recognition.onend = () => {
@@ -311,13 +304,12 @@
       const labelEl = btn.querySelector(".voiceLabel");
       if (labelEl) labelEl.textContent = "話して入力";
 
-      // 最後の「音声入力中…」を削除
-      removeLast_();
-
-      const text = (finalText || $("chatInput").value || "").trim();
+      // 自動送信しない（送信ボタン押下のみ）
+      // テキストがあれば確認メッセージ
+      const text = ($("chatInput").value || "").trim();
       if (text) {
-        $("chatInput").value = text;
-        sendChat_();
+        pushChat_("user", `🎤 ${text}`);
+        pushChat_("ai", "内容を確認して「送信」を押してください。修正も可能です。");
       }
     };
 
