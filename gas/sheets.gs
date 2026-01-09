@@ -8,12 +8,8 @@
  * rowObjのキーがヘッダ名と一致すれば書き込み、なければ空
  */
 function appendTransactionRow_(rowObj, traceId) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sh = ss.getSheetByName("04_Transactions");
-  if (!sh) {
-    throw makeAppError_("E_SHEET_WRITE_FAILED", "04_Transactions not found", traceId, true,
-      "保存に失敗しました（シートが見つかりません）。");
-  }
+  // getSheet_ を使用（openById経由・WebApp安全）
+  const sh = getSheet_("04_Transactions");
 
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
@@ -51,10 +47,8 @@ function appendTransactionRow_(rowObj, traceId) {
 }
 
 function getSheetByName_(name) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(name);
-  if (!sheet) throw new Error(`Sheet not found: ${name}`);
-  return sheet;
+  // getSheet_ を使用（openById経由・WebApp安全）
+  return getSheet_(name);
 }
 
 function withSheetLock_(fn) {

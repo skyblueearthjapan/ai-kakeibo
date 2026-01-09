@@ -725,7 +725,8 @@ function getCategories() {
   const started = Date.now();
 
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("02_Categories");
+    // getSheetOrNull_ を使用（openById経由・WebApp安全）
+    const sheet = getSheetOrNull_("02_Categories");
     let categories = [];
 
     if (sheet) {
@@ -776,7 +777,8 @@ function getAccounts() {
   const started = Date.now();
 
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("03_Accounts");
+    // getSheetOrNull_ を使用（openById経由・WebApp安全）
+    const sheet = getSheetOrNull_("03_Accounts");
     let accounts = [];
 
     if (sheet) {
@@ -822,7 +824,8 @@ function getUiMasterData() {
   const started = Date.now();
 
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    // getSs_ を使用（openById経由・WebApp安全）
+    const ss = getSs_();
 
     // 01_Settings シートから読み込み
     const settingsSheet = ss.getSheetByName("01_Settings");

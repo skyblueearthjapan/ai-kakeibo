@@ -108,7 +108,8 @@ function loadCategoryDict_() {
     try { return JSON.parse(cached); } catch (e) {}
   }
 
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("02_Categories");
+  // getSheetOrNull_ を使用（openById経由・WebApp安全）
+  const sheet = getSheetOrNull_("02_Categories");
   if (!sheet) return [];
 
   const values = sheet.getDataRange().getValues();

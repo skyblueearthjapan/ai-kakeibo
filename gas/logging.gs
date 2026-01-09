@@ -96,7 +96,8 @@ function logOpenAICall_(traceId, operation, model, tokensIn, tokensOut, duration
  * 09_Logsシートを取得（なければ作成）
  */
 function getOrCreateLogSheet_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  // getSs_ を使用（openById経由・WebApp安全）
+  const ss = getSs_();
   let sheet = ss.getSheetByName("09_Logs");
 
   if (!sheet) {
@@ -166,7 +167,8 @@ function getOpsSummary(days) {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
 
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("09_Logs");
+    // getSheetOrNull_ を使用（openById経由・WebApp安全）
+    const sheet = getSheetOrNull_("09_Logs");
     if (!sheet) {
       return {
         ok: true,

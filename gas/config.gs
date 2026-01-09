@@ -34,7 +34,8 @@ function loadConfig_() {
   const config = Object.assign({}, DEFAULT_CONFIG);
 
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("01_Settings");
+    // getSheetOrNull_ を使用（openById経由・WebApp安全）
+    const sheet = getSheetOrNull_("01_Settings");
     if (!sheet) {
       configCache_ = config;
       return config;
@@ -158,22 +159,44 @@ function clearConfigCache_() {
 
 /**
  * 01_Settings を Key-Value（A列=key, B列=value）として読む
+ * 注意: getSpreadsheetId_()から呼ばれる可能性があるため、
+ *       循環参照を避けるために直接openByIdを使用
  */
 function getConfigKV_() {
   const out = {};
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sh = ss.getSheetByName("01_Settings");
-  if (!sh) return out;
 
-  const last = sh.getLastRow();
-  if (last < 1) return out;
+  try {
+    // まずScript PropertiesからSPREADSHEET_IDを直接取得（循環回避）
+    const props = PropertiesService.getScriptProperties();
+    const ssId = props.getProperty("SPREADSHEET_ID");
 
-  const values = sh.getRange(1, 1, last, 2).getValues();
-  values.forEach(([k, v]) => {
-    const key = String(k || "").trim();
-    if (!key) return;
-    out[key] = v;
-  });
+    let sh = null;
+    if (ssId) {
+      // openByIdで直接アクセス
+      const ss = SpreadsheetApp.openById(ssId);
+      sh = ss.getSheetByName("01_Settings");
+    } else {
+      // フォールバック: コンテナバインドなら動く
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      if (ss) sh = ss.getSheetByName("01_Settings");
+    }
+
+    if (!sh) return out;
+
+    const last = sh.getLastRow();
+    if (last < 1) return out;
+
+    const values = sh.getRange(1, 1, last, 2).getValues();
+    values.forEach(([k, v]) => {
+      const key = String(k || "").trim();
+      if (!key) return;
+      out[key] = v;
+    });
+  } catch (e) {
+    // アクセスできない場合は空を返す
+    console.log("getConfigKV_ failed: " + e.message);
+  }
+
   return out;
 }
 
@@ -191,13 +214,15 @@ function getOpenAiApiKey_() {
   const cfg = getConfigKV_();
   if (cfg.OPENAI_API_KEY) return String(cfg.OPENAI_API_KEY).trim();
 
-  // 3. 互換：B26 を読む（暫定）
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sh = ss.getSheetByName("01_Settings");
-  if (sh) {
-    const v26 = String(sh.getRange("B26").getValue() || "").trim();
-    if (v26) return v26;
-  }
+  // 3. 互換：B26 を読む（暫定）- getSheetOrNull_使用
+  try {
+    const sh = getSheetOrNull_("01_Settings");
+    if (sh) {
+      const v26 = String(sh.getRange("B26").getValue() || "").trim();
+      if (v26) return v26;
+    }
+  } catch (_) {}
+
   return "";
 }
 

@@ -85,15 +85,16 @@ function markAsProcessed_(clientRequestId, txnId, result) {
  * 10_Dedupシートを取得
  */
 function getDedupSheet_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  return ss.getSheetByName("10_Dedup");
+  // getSheetOrNull_ を使用（openById経由・WebApp安全）
+  return getSheetOrNull_("10_Dedup");
 }
 
 /**
  * 10_Dedupシートを取得（なければ作成）
  */
 function getOrCreateDedupSheet_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  // getSs_ を使用（openById経由・WebApp安全）
+  const ss = getSs_();
   let sheet = ss.getSheetByName("10_Dedup");
 
   if (!sheet) {
