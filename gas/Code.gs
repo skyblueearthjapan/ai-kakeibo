@@ -637,13 +637,17 @@ function saveTransactionDraft(draft, clientContext) {
   const traceId = makeTraceId_();
   const started = Date.now();
   const clientRequestId = clientContext?.client_request_id || null;
+  let lock = null;
 
   try {
-    // 二重送信チェック
+    // DocumentLock取得（WebApp安全）
+    lock = acquireProcessingLock_(traceId);
+
+    // 二重送信チェック（Cache版）
     if (clientRequestId) {
       const dup = checkDuplicate_(clientRequestId);
       if (dup) {
-        logSuccess_(traceId, "saveTransactionDraft", Date.now() - started, { txn_id: dup.result?.transaction_id });
+        appendLog_("INFO", `Duplicate request: ${clientRequestId}`, traceId);
         return dup;
       }
 
@@ -661,32 +665,13 @@ function saveTransactionDraft(draft, clientContext) {
       throw makeAppError_("E_BAD_REQUEST", "Invalid amount", traceId, false, "金額が正しく入力されていません。");
     }
 
-    // 行データ作成
-    const row = {
-      id: generateTransactionId_(),
-      date: draft.date || "",
-      type: draft.type || "expense",
-      account: draft.account || "",
-      merchant: draft.merchant || "",
-      item: draft.item || "",
-      category: draft.category || "",
-      subcategory: draft.subcategory || "",
-      payment_method: draft.payment_method || "",
-      amount: Number(draft.amount),
-      memo: draft.memo || "",
-      tags: draft.tags || "",
-      source: draft.source || "manual",
-      confidence: 0,
-      receipt_file_id: draft.receipt_file_id || "",
-      raw_text: draft.raw_text || "",
-      status: "confirmed", // Phase7: ユーザー確定なので即confirmed
-      trace_id: traceId,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
+    // 行データ作成（ヘッダ駆動と相性の良い形式）
+    const row = normalizeDraftToRowObj_(draft, traceId);
 
-    // シートに保存
+    // シートに保存（openById経由・WebApp安全）
     const txnId = appendTransactionRow_(row, traceId);
+
+    appendLog_("INFO", `Saved txnId=${txnId}`, traceId);
 
     const result = {
       ok: true,
@@ -696,8 +681,6 @@ function saveTransactionDraft(draft, clientContext) {
       }
     };
 
-    logSuccess_(traceId, "saveTransactionDraft", Date.now() - started, { txn_id: txnId });
-
     if (clientRequestId) {
       markAsProcessed_(clientRequestId, txnId, result);
       releaseProcessingLock_(clientRequestId);
@@ -706,14 +689,59 @@ function saveTransactionDraft(draft, clientContext) {
     return result;
 
   } catch (err) {
-    logError_(traceId, "saveTransactionDraft", Date.now() - started, normalizeError_(err, traceId).code, String(err), {});
+    appendLog_("ERROR", `saveTransactionDraft failed: ${err}`, traceId);
 
     if (clientRequestId) {
       releaseProcessingLock_(clientRequestId);
     }
 
-    return makeErrResult_(err, traceId, started);
+    return {
+      ok: false,
+      error: {
+        code: "E_SHEET_WRITE_FAILED",
+        message: "保存に失敗しました。もう一度お試しください。",
+        traceId: traceId,
+        detail: String(err)
+      }
+    };
+  } finally {
+    // DocumentLock確実解放
+    releaseProcessingLockSafe_(lock, traceId);
   }
+}
+
+/**
+ * DraftオブジェクトをRowオブジェクトに正規化
+ * ヘッダ駆動appendTransactionRow_と相性の良い形式に変換
+ */
+function normalizeDraftToRowObj_(draft, traceId) {
+  const d = draft || {};
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const today = Utilities.formatDate(now, Session.getScriptTimeZone(), "yyyy-MM-dd");
+
+  return {
+    id: generateTransactionId_(),
+    created_at: nowIso,
+    updated_at: nowIso,
+    date: d.date || today,
+    type: d.type || "expense",
+    account: d.account || "",
+    merchant: String(d.merchant || ""),
+    item: String(d.item || ""),
+    category: String(d.category || d.category_name || ""),
+    subcategory: String(d.subcategory || ""),
+    payment_method: String(d.payment_method || d.payment || ""),
+    amount: Number(d.amount || 0),
+    memo: String(d.memo || ""),
+    tags: String(d.tags || ""),
+    source: d.source || "manual",
+    confidence: 0,
+    receipt_file_id: d.receipt_file_id || "",
+    raw_text: String(d.raw_text || ""),
+    status: "confirmed",  // ユーザー確定なので即confirmed
+    trace_id: traceId
+  };
 }
 
 /**

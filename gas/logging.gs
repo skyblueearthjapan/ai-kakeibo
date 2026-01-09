@@ -154,6 +154,30 @@ function getAppVersion_() {
 }
 
 /**
+ * シンプルなログ追記（失敗しても絶対に処理を止めない）
+ * @param {string} level ログレベル（INFO, ERROR, WARN）
+ * @param {string} message メッセージ
+ * @param {string} traceId トレースID
+ */
+function appendLog_(level, message, traceId) {
+  try {
+    const sheet = getOrCreateLogSheet_();
+    sheet.appendRow([
+      new Date().toISOString(),
+      traceId || "",
+      "appendLog",
+      level || "INFO",
+      "",
+      String(message || "").slice(0, 500),
+      0, "", 0, "", 0, 0, 0, getAppVersion_(), "", ""
+    ]);
+  } catch (e) {
+    // ログ失敗では絶対に処理を止めない
+    console.log(`Log write failed: ${e}`);
+  }
+}
+
+/**
  * 運用サマリー取得（直近N日）
  * @param {number} days 日数（デフォルト7）
  * @return {Object} サマリー
