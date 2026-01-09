@@ -220,7 +220,7 @@
 
         setTimeout(() => {
           clearHomeForm();
-          setHomeStatus("レシート撮影または音声入力で自動入力できます");
+          setHomeStatus("音声で話しかけると自動入力できます");
         }, 2000);
       })
       .withFailureHandler((e) => {
@@ -231,7 +231,7 @@
   }
 
   /**
-   * ホームフォームをクリア
+   * ホームフォームをクリア＆非表示
    */
   function clearHomeForm() {
     if ($("inputDate")) $("inputDate").value = getTodayISO_();
@@ -240,15 +240,17 @@
     if ($("inputCategory")) $("inputCategory").value = "";
     if ($("inputPayment")) $("inputPayment").value = "";
     if ($("inputMemo")) $("inputMemo").value = "";
-    if ($("receiptCam")) $("receiptCam").value = "";
-    if ($("receiptPick")) $("receiptPick").value = "";
     if ($("chatInput")) $("chatInput").value = "";
-    // チャット履歴はクリアしない（ユーザー体験維持）
+
+    // フォームを非表示に戻す
+    const formWrap = $("txnFormWrap");
+    if (formWrap) formWrap.style.display = "none";
+
     // AIプレビューを非表示
     const previewCard = $("aiPreviewCard");
     if (previewCard) previewCard.style.display = "none";
+
     LAST_AI_DRAFT = null;
-    setOcrStatus("", "");
   }
 
   /* ========== 音声入力 ========== */
@@ -257,7 +259,7 @@
   let listening = false;
 
   /**
-   * 音声入力のセットアップ（チャット連携版）
+   * 音声入力のセットアップ（音声ファースト版）
    */
   function setupVoiceInput_() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -266,7 +268,9 @@
     if (!SR || !btn) {
       if (btn) {
         btn.disabled = true;
-        btn.textContent = "🎤 音声（非対応）";
+        const iconEl = btn.querySelector(".voiceIcon");
+        const labelEl = btn.querySelector(".voiceLabel");
+        if (labelEl) labelEl.textContent = "非対応";
       }
       return;
     }
@@ -282,7 +286,8 @@
       listening = true;
       finalText = "";
       btn.classList.add("listening");
-      btn.textContent = "⏺ 録音中...";
+      const labelEl = btn.querySelector(".voiceLabel");
+      if (labelEl) labelEl.textContent = "録音中...";
       pushChat_("user", "🎤 音声入力中…");
     };
 
@@ -303,7 +308,8 @@
     recognition.onend = () => {
       listening = false;
       btn.classList.remove("listening");
-      btn.textContent = "🎤 音声";
+      const labelEl = btn.querySelector(".voiceLabel");
+      if (labelEl) labelEl.textContent = "話して入力";
 
       // 最後の「音声入力中…」を削除
       removeLast_();
@@ -318,7 +324,8 @@
     recognition.onerror = (e) => {
       listening = false;
       btn.classList.remove("listening");
-      btn.textContent = "🎤 音声";
+      const labelEl = btn.querySelector(".voiceLabel");
+      if (labelEl) labelEl.textContent = "話して入力";
       removeLast_();
 
       if (e.error === "not-allowed") {
@@ -535,20 +542,61 @@
   }
 
   /**
-   * AI確定 -> フォームに反映
+   * AI確定 -> フォーム展開 -> 反映
    */
   function acceptAiDraft_() {
     if (!LAST_AI_DRAFT) return;
+
+    // フォームを展開
+    openManualForm_();
+
+    // ドラフトを反映
     applyDraftToHomeForm_(LAST_AI_DRAFT);
 
     const card = $("aiPreviewCard");
     if (card) card.style.display = "none";
 
     // フォーム位置へスクロール
-    const formTop = $("inputDate") || document.body;
-    formTop.scrollIntoView({ behavior: "smooth", block: "start" });
+    const formWrap = $("txnFormWrap");
+    if (formWrap) formWrap.scrollIntoView({ behavior: "smooth", block: "start" });
 
     setHomeStatus("フォームに反映しました。確認して「確定して保存」を押してください");
+  }
+
+  /**
+   * 手入力フォームをトグル表示
+   */
+  function toggleManual_() {
+    const wrap = $("txnFormWrap");
+    if (!wrap) return;
+
+    const isHidden = wrap.style.display === "none" || !wrap.style.display;
+    wrap.style.display = isHidden ? "block" : "none";
+
+    if (isHidden) {
+      // 日付を今日に設定
+      if ($("inputDate")) $("inputDate").value = getTodayISO_();
+      wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
+  /**
+   * 手入力フォームを開く
+   */
+  function openManualForm_() {
+    const wrap = $("txnFormWrap");
+    if (!wrap) return;
+    wrap.style.display = "block";
+    // 日付を今日に設定
+    if ($("inputDate")) $("inputDate").value = getTodayISO_();
+  }
+
+  /**
+   * チャット履歴をクリア
+   */
+  function clearChat_() {
+    const box = $("chatBox");
+    if (box) box.innerHTML = "";
   }
 
   /**
@@ -1126,22 +1174,12 @@
 
     // ホームフォーム日付初期化
     if ($("inputDate")) $("inputDate").value = getTodayISO_();
-    if ($("formDate")) $("formDate").value = getTodayISO_();
-
-    // カメラ/写真イベント -> AIチャットへ接続
-    const cam = $("receiptCam");
-    const pick = $("receiptPick");
-    if (cam) cam.addEventListener("change", () => {
-      handleReceiptToAi_(cam.files[0], "camera");
-      cam.value = "";
-    });
-    if (pick) pick.addEventListener("change", () => {
-      handleReceiptToAi_(pick.files[0], "picker");
-      pick.value = "";
-    });
 
     // 音声入力セットアップ
     setupVoiceInput_();
+
+    // AIバッジ更新
+    updateAiBadge_();
 
     // マスタデータ読み込み（カテゴリ/支払方法）
     google.script.run
@@ -1155,14 +1193,36 @@
         // ホームタブのselect
         fillSelect_($("inputCategory"), MASTER.categories, "カテゴリを選択");
         fillSelect_($("inputPayment"), MASTER.paymentMethods, "支払方法を選択");
-
-        // 入力タブのselect
-        fillSelect_($("formCategory"), MASTER.categories, "カテゴリを選択");
-        fillSelect_($("formPayment"), MASTER.paymentMethods, "支払方法を選択");
       })
       .withFailureHandler((e) => {
         console.error("Failed to load UI master data:", e);
       })
       .getUiMasterData();
   });
+
+  /**
+   * AIバッジを更新
+   */
+  function updateAiBadge_() {
+    const badge = $("aiBadge");
+    if (!badge) return;
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (!res || !res.ok) {
+          badge.textContent = "AI:--";
+          badge.className = "aiBadge";
+          return;
+        }
+        const r = res.result;
+        const isOn = r.aiEnabled && r.hasKey;
+        badge.textContent = isOn ? "AI:ON" : "AI:OFF";
+        badge.className = "aiBadge " + (isOn ? "on" : "off");
+      })
+      .withFailureHandler(() => {
+        badge.textContent = "AI:--";
+        badge.className = "aiBadge";
+      })
+      .debugAiStatus();
+  }
 </script>

@@ -9,49 +9,53 @@
 </head>
 <body>
   <header class="top">
-    <div class="title">家計簿受付</div>
-    <div class="subtitle">かんたん入力・レシート撮影</div>
+    <div class="headerRow">
+      <div>
+        <div class="title">家計簿受付</div>
+        <div class="subtitle">話しかけて入力</div>
+      </div>
+      <span id="aiBadge" class="aiBadge" title="AI状態">AI:--</span>
+    </div>
   </header>
 
-  <!-- タブナビゲーション -->
+  <!-- タブナビゲーション（入力タブ削除） -->
   <nav class="tabs">
     <button class="tab active" data-tab="home" onclick="switchTab('home')">ホーム</button>
-    <button class="tab" data-tab="input" onclick="switchTab('input')">入力</button>
     <button class="tab" data-tab="history" onclick="switchTab('history')">履歴</button>
     <button class="tab" data-tab="analytics" onclick="switchTab('analytics')">分析</button>
   </nav>
 
-  <!-- ホームタブ：AI統合入力 -->
+  <!-- ホームタブ：音声ファースト -->
   <main id="tab-home" class="wrap tab-content active">
-    <!-- ===== AIチャット受付 ===== -->
-    <section class="card pastel-mint" id="aiChatCard">
-      <h3>AI受付（話しかけて入力）</h3>
 
+    <!-- ===== AI受付（音声ファースト） ===== -->
+    <section class="card pastel-mint" id="aiChatCard">
+      <div class="cardHeader">
+        <h3>AI受付</h3>
+        <button class="tinyBtn" type="button" onclick="clearChat_()">クリア</button>
+      </div>
+
+      <!-- 音声ボタン（最上部・目立つ） -->
+      <div class="voiceMain">
+        <button class="voiceBtn" id="btnMic" type="button">
+          <span class="voiceIcon">🎤</span>
+          <span class="voiceLabel">話して入力</span>
+        </button>
+      </div>
+
+      <!-- チャット欄 -->
       <div class="chatBox" id="chatBox"></div>
 
+      <!-- キーボード入力（控えめ） -->
       <div class="chatRow">
-        <textarea id="chatInput" rows="2" placeholder="例：すき家 2000円 現金 / 交通費 180円 suica"></textarea>
-        <button class="assistBtn primary chatSendBtn" type="button" onclick="sendChat_()">送信</button>
+        <textarea id="chatInput" rows="2" placeholder="キーボードで入力もできます"></textarea>
+        <button class="assistBtn secondary chatSendBtn" type="button" onclick="sendChat_()">送信</button>
       </div>
 
-      <div class="row actions">
-        <button class="assistBtn secondary" type="button" onclick="checkAiStatus_()">AI状態</button>
-        <div id="aiStatus" class="hint"></div>
+      <!-- 手入力ボタン -->
+      <div class="row actions" style="margin-top:12px;">
+        <button class="assistBtn secondary" type="button" onclick="toggleManual_()">手入力でフォームを開く</button>
       </div>
-
-      <div class="row actions">
-        <label class="assistBtn primary">
-          📷 カメラ
-          <input id="receiptCam" type="file" accept="image/*" capture="environment" hidden />
-        </label>
-        <label class="assistBtn secondary">
-          🖼 写真
-          <input id="receiptPick" type="file" accept="image/*" hidden />
-        </label>
-        <button class="assistBtn mic" id="btnMic" type="button">🎤 音声</button>
-      </div>
-
-      <div class="hint">※ AIが提案 → OKで取引フォームに反映します</div>
     </section>
 
     <!-- ===== AIプレビュー ===== -->
@@ -59,14 +63,14 @@
       <h3>AIの提案</h3>
       <div id="aiPreviewBody" class="previewBody"></div>
       <div class="row actions">
-        <button class="assistBtn primary" type="button" onclick="acceptAiDraft_()">この内容でOK（フォームに反映）</button>
+        <button class="assistBtn primary" type="button" onclick="acceptAiDraft_()">この内容でOK</button>
         <button class="assistBtn secondary" type="button" onclick="retryAi_()">やり直す</button>
       </div>
       <div class="hint" id="aiPreviewHint"></div>
     </section>
 
-    <!-- 入力フォーム -->
-    <section class="card pastel-lav">
+    <!-- 取引フォーム（初期非表示） -->
+    <section id="txnFormWrap" class="card pastel-lav" style="display:none;">
       <h3>取引を入力</h3>
       <div class="form-group">
         <label for="inputDate">日付</label>
@@ -103,51 +107,7 @@
     <!-- 結果表示 -->
     <section class="card pastel-blue">
       <h3>結果</h3>
-      <pre id="homeStatus" class="status">レシート撮影または音声入力で自動入力できます</pre>
-    </section>
-  </main>
-
-  <!-- 入力タブ：手入力専用（シンプル版） -->
-  <main id="tab-input" class="wrap tab-content">
-    <section class="card pastel-lav">
-      <h3>手入力フォーム</h3>
-      <div class="hint" style="margin-bottom:12px;">カメラや音声を使わず、直接入力したい場合はこちら</div>
-      <div class="form-group">
-        <label for="formDate">日付</label>
-        <input type="date" id="formDate" class="form-input">
-      </div>
-      <div class="form-group">
-        <label for="formAmount">金額</label>
-        <input type="number" id="formAmount" class="form-input" placeholder="0" min="0">
-      </div>
-      <div class="form-group">
-        <label for="formMerchant">店名・内容</label>
-        <input type="text" id="formMerchant" class="form-input" placeholder="店名や支払先">
-      </div>
-      <div class="form-group">
-        <label for="formCategory">カテゴリ</label>
-        <select id="formCategory" class="form-input">
-          <option value="">選択してください</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label for="formPayment">支払方法</label>
-        <select id="formPayment" class="form-input">
-          <option value="">選択してください</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label for="formMemo">メモ</label>
-        <input type="text" id="formMemo" class="form-input" placeholder="任意">
-      </div>
-      <button id="btnSaveDraft" class="btn primary" onclick="saveDraft()">確定して保存</button>
-      <button class="btn secondary" onclick="clearForm()">クリア</button>
-    </section>
-
-    <!-- 保存結果 -->
-    <section class="card pastel-blue">
-      <h3>結果</h3>
-      <pre id="formStatus" class="status">入力してください</pre>
+      <pre id="homeStatus" class="status">音声で話しかけると自動入力できます</pre>
     </section>
   </main>
 

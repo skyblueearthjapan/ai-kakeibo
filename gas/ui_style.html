@@ -30,6 +30,12 @@
     padding: 16px 16px 10px;
   }
 
+  .headerRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
   .title {
     font-size: 20px;
     font-weight: 800;
@@ -39,6 +45,98 @@
     font-size: 13px;
     color: var(--muted);
     margin-top: 4px;
+  }
+
+  /* AIステータスバッジ（ヘッダー右上） */
+  .aiBadge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 800;
+    background: rgba(17, 24, 39, 0.08);
+    color: rgba(17, 24, 39, 0.75);
+  }
+
+  .aiBadge.on {
+    background: #DFF7EE;
+    color: #047857;
+  }
+
+  .aiBadge.off {
+    background: #FFE3EE;
+    color: #BE185D;
+  }
+
+  /* カードヘッダー（タイトル+ボタン横並び） */
+  .cardHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .cardHeader h3 {
+    margin: 0;
+  }
+
+  /* 小さいユーティリティボタン */
+  .tinyBtn {
+    border: none;
+    border-radius: 10px;
+    padding: 6px 12px;
+    background: rgba(17, 24, 39, 0.08);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    color: var(--muted);
+  }
+
+  .tinyBtn:active {
+    opacity: 0.7;
+  }
+
+  /* 音声ファーストUI */
+  .voiceMain {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 12px;
+  }
+
+  .voiceBtn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    border: none;
+    background: linear-gradient(135deg, #FFE3EE 0%, #FFB3C7 100%);
+    color: #7A1F3D;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transition: transform 0.1s;
+  }
+
+  .voiceBtn:active {
+    transform: scale(0.95);
+  }
+
+  .voiceBtn.listening {
+    background: linear-gradient(135deg, #FFB3C7 0%, #FF6B8A 100%);
+    animation: pulse 1.2s infinite;
+  }
+
+  .voiceIcon {
+    font-size: 36px;
+  }
+
+  .voiceLabel {
+    font-size: 14px;
+    font-weight: 800;
   }
 
   .wrap {
@@ -836,8 +934,8 @@
     border: 1px solid rgba(17, 24, 39, 0.12);
     border-radius: 14px;
     padding: 10px;
-    min-height: 90px;
-    max-height: 220px;
+    min-height: 60px;
+    max-height: 140px;
     overflow: auto;
   }
 
