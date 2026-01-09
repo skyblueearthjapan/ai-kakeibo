@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>家計簿受付</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <?!= include('ui_style'); ?>
 </head>
 <body>
@@ -16,6 +17,7 @@
   <nav class="tabs">
     <button class="tab active" data-tab="home" onclick="switchTab('home')">ホーム</button>
     <button class="tab" data-tab="history" onclick="switchTab('history')">履歴</button>
+    <button class="tab" data-tab="analytics" onclick="switchTab('analytics')">分析</button>
   </nav>
 
   <!-- ホームタブ -->
@@ -75,6 +77,58 @@
       <div id="historyLoading" class="loading" style="display:none;">読み込み中...</div>
       <div id="historyList" class="history-list"></div>
       <div id="historyEmpty" class="empty-message" style="display:none;">該当する取引がありません</div>
+    </section>
+  </main>
+
+  <!-- 分析タブ -->
+  <main id="tab-analytics" class="wrap tab-content">
+    <!-- 月選択 -->
+    <section class="card pastel-yellow">
+      <div class="history-controls">
+        <div class="month-selector">
+          <button class="btn-small" onclick="changeAnalyticsMonth(-1)">&lt;</button>
+          <span id="analyticsMonth">2026-01</span>
+          <button class="btn-small" onclick="changeAnalyticsMonth(1)">&gt;</button>
+        </div>
+        <button class="btn-small" onclick="loadDashboard()">更新</button>
+      </div>
+    </section>
+
+    <!-- KPIカード -->
+    <section class="card pastel-mint">
+      <h3>今月のサマリー</h3>
+      <div id="kpiLoading" class="loading" style="display:none;">読み込み中...</div>
+      <div id="kpiSection" class="kpi-row">
+        <div class="kpi-item">
+          <div class="kpi-label">支出</div>
+          <div id="kpiExpense" class="kpi-value kpi-expense">-</div>
+        </div>
+        <div class="kpi-item">
+          <div class="kpi-label">収入</div>
+          <div id="kpiIncome" class="kpi-value kpi-income">-</div>
+        </div>
+        <div class="kpi-item">
+          <div class="kpi-label">収支</div>
+          <div id="kpiNet" class="kpi-value">-</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- カテゴリ別内訳 -->
+    <section class="card pastel-lav">
+      <h3>カテゴリ別支出</h3>
+      <div id="categoryChartContainer" class="chart-container">
+        <canvas id="categoryChart"></canvas>
+      </div>
+      <div id="categoryLegend" class="category-legend"></div>
+    </section>
+
+    <!-- 12ヶ月トレンド -->
+    <section class="card pastel-blue">
+      <h3>12ヶ月推移</h3>
+      <div id="trendChartContainer" class="chart-container">
+        <canvas id="trendChart"></canvas>
+      </div>
     </section>
   </main>
 

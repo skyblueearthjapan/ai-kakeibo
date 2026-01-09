@@ -237,3 +237,46 @@ function getCurrentMonthStart_() {
   const m = ("0" + (now.getMonth() + 1)).slice(-2);
   return `${y}-${m}-01`;
 }
+
+/** ========== Phase 4: ダッシュボード用ユーティリティ ========== */
+
+/**
+ * 04_Transactions の全行をObject配列で取得
+ * @param {string} traceId
+ * @return {Object[]} 全取引オブジェクト配列
+ */
+function getAllTransactionsAsObjects_(traceId) {
+  const values = getTransactionsAllValues_();
+  if (values.length <= 1) return [];
+
+  const idxMap = buildTransactionsHeaderIndex_(values[0]);
+  const rows = [];
+
+  for (let r = 1; r < values.length; r++) {
+    rows.push(rowToObject_(values[r], idxMap));
+  }
+
+  return rows;
+}
+
+/**
+ * 01_Settings から通貨設定を取得
+ * @return {string} 通貨コード（例: "JPY"）
+ */
+function getSettingsCurrency_() {
+  try {
+    const sheet = getSheetByName_("01_Settings");
+    const values = sheet.getDataRange().getValues();
+
+    // key=currency の行を探す
+    for (let r = 0; r < values.length; r++) {
+      const key = String(values[r][0]).toLowerCase().trim();
+      if (key === "currency") {
+        return String(values[r][1]).trim() || "JPY";
+      }
+    }
+    return "JPY";
+  } catch (e) {
+    return "JPY";
+  }
+}

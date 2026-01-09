@@ -307,3 +307,56 @@ function updateTransaction(id, patch) {
     return makeErrResult_(err, traceId, started);
   }
 }
+
+/** ========== Phase 4: ダッシュボード ========== */
+
+/**
+ * UI -> GAS: ダッシュボードデータを取得
+ * @param {string} monthStart YYYY-MM-DD（月初）、未指定なら当月
+ * @param {Object=} opts { includeUnconfirmed }
+ * @return {Object} DashboardResult
+ */
+function getDashboard(monthStart, opts) {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    const ms = normalizeMonthStart_(monthStart);
+    const o = opts || {};
+
+    const txns = getAllTransactionsAsObjects_(traceId);
+    const dashboard = buildDashboard_(txns, ms, { includeUnconfirmed: !!o.includeUnconfirmed });
+
+    // 通貨設定を取得
+    const currency = getSettingsCurrency_();
+
+    return {
+      ok: true,
+      result: {
+        monthStart: ms,
+        currency: currency,
+        kpi: dashboard.kpi,
+        byCategory: dashboard.byCategory,
+        trend12m: dashboard.trend12m,
+        meta: { duration_ms: Date.now() - started }
+      }
+    };
+
+  } catch (err) {
+    return makeErrResult_(err, traceId, started);
+  }
+}
+
+/**
+ * monthStartを正規化（未指定or不正の場合は当月）
+ */
+function normalizeMonthStart_(monthStart) {
+  if (!monthStart) return getCurrentMonthStart_();
+
+  const d = new Date(monthStart);
+  if (isNaN(d.getTime())) return getCurrentMonthStart_();
+
+  const y = d.getFullYear();
+  const m = ("0" + (d.getMonth() + 1)).slice(-2);
+  return `${y}-${m}-01`;
+}

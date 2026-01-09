@@ -196,6 +196,10 @@
     if (tabName === "history") {
       loadHistory();
     }
+    // 分析タブに切り替えたら読み込み
+    if (tabName === "analytics") {
+      loadDashboard();
+    }
   }
 
   /**
@@ -359,5 +363,196 @@
   document.addEventListener("DOMContentLoaded", () => {
     const d = new Date(currentMonthStart);
     $("currentMonth").textContent = `${d.getFullYear()}-${("0" + (d.getMonth() + 1)).slice(-2)}`;
+    // 分析タブの月も初期化
+    $("analyticsMonth").textContent = `${d.getFullYear()}-${("0" + (d.getMonth() + 1)).slice(-2)}`;
   });
+
+  /* ========== Phase 4: ダッシュボード ========== */
+
+  // 分析用の月（履歴タブとは独立）
+  let analyticsMonthStart = getCurrentMonthStart();
+
+  // Chart.jsインスタンス
+  let categoryChartInstance = null;
+  let trendChartInstance = null;
+
+  // カテゴリ別の色パレット
+  const CATEGORY_COLORS = [
+    "#6366F1", "#EC4899", "#F59E0B", "#10B981", "#3B82F6",
+    "#8B5CF6", "#EF4444", "#14B8A6", "#F97316", "#84CC16"
+  ];
+
+  /**
+   * 分析タブの月を変更
+   */
+  function changeAnalyticsMonth(delta) {
+    const d = new Date(analyticsMonthStart);
+    d.setMonth(d.getMonth() + delta);
+    const y = d.getFullYear();
+    const m = ("0" + (d.getMonth() + 1)).slice(-2);
+    analyticsMonthStart = `${y}-${m}-01`;
+    $("analyticsMonth").textContent = `${y}-${m}`;
+    loadDashboard();
+  }
+
+  /**
+   * ダッシュボードを読み込み
+   */
+  function loadDashboard() {
+    $("kpiLoading").style.display = "block";
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        $("kpiLoading").style.display = "none";
+
+        if (!res || !res.ok) {
+          console.error("Dashboard load failed:", res?.error);
+          return;
+        }
+
+        const { kpi, byCategory, trend12m, currency } = res.result;
+
+        renderKpi(kpi, currency);
+        renderCategoryChart(byCategory, currency);
+        renderTrendChart(trend12m, currency);
+      })
+      .withFailureHandler((e) => {
+        $("kpiLoading").style.display = "none";
+        console.error("Dashboard error:", e);
+      })
+      .getDashboard(analyticsMonthStart, {});
+  }
+
+  /**
+   * KPI表示
+   */
+  function renderKpi(kpi, currency) {
+    const fmt = (n) => {
+      if (currency === "JPY") {
+        return "¥" + n.toLocaleString();
+      }
+      return currency + " " + n.toLocaleString();
+    };
+
+    $("kpiExpense").textContent = fmt(kpi.expense);
+    $("kpiIncome").textContent = fmt(kpi.income);
+
+    const netEl = $("kpiNet");
+    netEl.textContent = fmt(kpi.net);
+    netEl.className = "kpi-value " + (kpi.net >= 0 ? "kpi-positive" : "kpi-negative");
+  }
+
+  /**
+   * カテゴリ別ドーナツチャート
+   */
+  function renderCategoryChart(byCategory, currency) {
+    const ctx = $("categoryChart").getContext("2d");
+
+    // 既存チャートを破棄
+    if (categoryChartInstance) {
+      categoryChartInstance.destroy();
+    }
+
+    if (!byCategory || byCategory.length === 0) {
+      $("categoryLegend").innerHTML = "<span class='empty-message'>データがありません</span>";
+      return;
+    }
+
+    const labels = byCategory.map(c => c.category);
+    const data = byCategory.map(c => c.amount);
+    const colors = byCategory.map((_, i) => CATEGORY_COLORS[i % CATEGORY_COLORS.length]);
+
+    categoryChartInstance = new Chart(ctx, {
+      type: "doughnut",
+      data: {
+        labels: labels,
+        datasets: [{
+          data: data,
+          backgroundColor: colors,
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }
+        }
+      }
+    });
+
+    // カスタム凡例を生成
+    const total = data.reduce((a, b) => a + b, 0);
+    const legendHtml = byCategory.map((c, i) => {
+      const pct = total > 0 ? Math.round((c.amount / total) * 100) : 0;
+      const color = CATEGORY_COLORS[i % CATEGORY_COLORS.length];
+      return `
+        <div class="legend-item">
+          <span class="legend-color" style="background:${color}"></span>
+          <span class="legend-label">${c.category}</span>
+          <span class="legend-value">${pct}%</span>
+        </div>
+      `;
+    }).join("");
+    $("categoryLegend").innerHTML = legendHtml;
+  }
+
+  /**
+   * 12ヶ月トレンド折れ線グラフ
+   */
+  function renderTrendChart(trend12m, currency) {
+    const ctx = $("trendChart").getContext("2d");
+
+    // 既存チャートを破棄
+    if (trendChartInstance) {
+      trendChartInstance.destroy();
+    }
+
+    if (!trend12m || trend12m.length === 0) {
+      return;
+    }
+
+    const labels = trend12m.map(t => {
+      const parts = t.month.split("-");
+      return `${parts[1]}月`;
+    });
+    const data = trend12m.map(t => t.expense);
+
+    trendChartInstance = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: "支出",
+          data: data,
+          borderColor: "#6366F1",
+          backgroundColor: "rgba(99, 102, 241, 0.1)",
+          fill: true,
+          tension: 0.3,
+          pointRadius: 3,
+          pointBackgroundColor: "#6366F1"
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              callback: function(value) {
+                if (currency === "JPY") {
+                  return "¥" + value.toLocaleString();
+                }
+                return value.toLocaleString();
+              }
+            }
+          }
+        }
+      }
+    });
+  }
 </script>
