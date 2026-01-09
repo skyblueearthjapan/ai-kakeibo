@@ -170,9 +170,13 @@ function computeFixedCost_(thisCatMap, txnExpenseTotal, fixedCategories) {
     })
     .sort(function(a, b) { return b.amount - a.amount; });
 
-  // 固定費が transactions に入っていない運用なので、分母に fixedTotal を加算
-  const expenseTotal = txnExpenseTotal + fixedTotal;
-  console.log("[FIXED] expenseTotal (txn+fixed)=", expenseTotal);
+  // 変動費 = Transactions の支出合計（固定費は別管理なので含まない）
+  const variableTotal = txnExpenseTotal;
+
+  // 支出合計 = 固定費 + 変動費
+  const expenseTotal = fixedTotal + variableTotal;
+  console.log("[FIXED] variableTotal=", variableTotal);
+  console.log("[FIXED] expenseTotal (fixed+variable)=", expenseTotal);
 
   const ratioPct = expenseTotal > 0 ? round1_((fixedTotal / expenseTotal) * 100) : 0;
   console.log("[FIXED] ratio%=", ratioPct);
@@ -180,8 +184,15 @@ function computeFixedCost_(thisCatMap, txnExpenseTotal, fixedCategories) {
   return {
     categories: fixedCategories,
     this_total: Math.round(fixedTotal),
+    variable_total: Math.round(variableTotal),
+    expense_total: Math.round(expenseTotal),
     this_ratio_pct: ratioPct,
-    breakdown
+    breakdown,
+    // ドーナツグラフ用データ
+    pie: {
+      labels: ["固定費", "変動費"],
+      values: [Math.round(fixedTotal), Math.round(variableTotal)]
+    }
   };
 }
 

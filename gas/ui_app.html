@@ -1262,24 +1262,89 @@
     }).join("");
   }
 
+  // 固定費ドーナツグラフのインスタンス
+  let fixedCostPieChart = null;
+
   function renderFixedCost(fixedCost, currency) {
     const fmt = (n) => currency === "JPY" ? "¥" + n.toLocaleString() : currency + " " + n.toLocaleString();
 
     $("fixedRatio").textContent = fixedCost.this_ratio_pct + "%";
     $("fixedTotal").textContent = fmt(fixedCost.this_total);
 
+    // ドーナツグラフを描画
+    renderFixedCostPieChart(fixedCost.pie, fmt);
+
     const breakdown = fixedCost.breakdown || [];
     if (breakdown.length === 0) {
-      $("fixedBreakdown").innerHTML = "<span class='empty-message'>固定費データなし</span>";
+      const breakdownEl = $("fixedBreakdown");
+      if (breakdownEl) breakdownEl.innerHTML = "<span class='empty-message'>固定費データなし</span>";
       return;
     }
 
-    $("fixedBreakdown").innerHTML = breakdown.map(item => `
-      <div class="fixed-item">
-        <span class="fixed-item-cat">${item.category}</span>
-        <span class="fixed-item-amt">${fmt(item.amount)}</span>
-      </div>
-    `).join("");
+    const breakdownEl = $("fixedBreakdown");
+    if (breakdownEl) {
+      breakdownEl.innerHTML = breakdown.map(item => `
+        <div class="fixed-item">
+          <span class="fixed-item-cat">${item.category}</span>
+          <span class="fixed-item-amt">${fmt(item.amount)}</span>
+        </div>
+      `).join("");
+    }
+  }
+
+  function renderFixedCostPieChart(pie, fmt) {
+    const canvas = $("fixedCostPieChart");
+    if (!canvas) return;
+
+    // pieデータがない場合はスキップ
+    if (!pie || !pie.values || pie.values.every(v => v === 0)) {
+      return;
+    }
+
+    const ctx = canvas.getContext("2d");
+    const data = {
+      labels: pie.labels || ["固定費", "変動費"],
+      datasets: [{
+        data: pie.values,
+        backgroundColor: ["#6366F1", "#10B981"],
+        borderWidth: 0
+      }]
+    };
+
+    const options = {
+      responsive: true,
+      maintainAspectRatio: true,
+      cutout: "65%",
+      plugins: {
+        legend: {
+          display: true,
+          position: "bottom",
+          labels: {
+            font: { size: 11 },
+            padding: 8
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              const v = context.raw || 0;
+              return context.label + ": " + fmt(v);
+            }
+          }
+        }
+      }
+    };
+
+    if (fixedCostPieChart) {
+      fixedCostPieChart.data = data;
+      fixedCostPieChart.update();
+    } else {
+      fixedCostPieChart = new Chart(ctx, {
+        type: "doughnut",
+        data: data,
+        options: options
+      });
+    }
   }
 
   /* ========== 収入入力 ========== */
