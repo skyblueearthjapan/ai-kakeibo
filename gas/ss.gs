@@ -97,3 +97,40 @@ function debugSpreadsheetId_() {
     return { ok: false, error: e.message };
   }
 }
+
+/**
+ * ★ デバッグ用: GASエディタで手動実行してアクセス状況を確認
+ */
+function debugAccess() {
+  console.log("=== DEBUG ACCESS ===");
+
+  // 1) getActiveSpreadsheet テスト
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (ss) {
+      console.log("✅ getActiveSpreadsheet: " + ss.getName() + " (ID: " + ss.getId() + ")");
+    } else {
+      console.log("❌ getActiveSpreadsheet: NULL");
+    }
+  } catch(e) {
+    console.log("❌ getActiveSpreadsheet ERROR: " + e);
+  }
+
+  // 2) openById テスト
+  const testId = "1a2rTbAwIBYfH0CstleN15VvUwk4AyisJJ3QFyok8uWY";
+  try {
+    const ss2 = SpreadsheetApp.openById(testId);
+    console.log("✅ openById: " + ss2.getName());
+  } catch(e) {
+    console.log("❌ openById ERROR: " + e);
+  }
+
+  // 3) Script Properties テスト
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const savedId = props.getProperty("SPREADSHEET_ID");
+    console.log("Script Properties SPREADSHEET_ID: " + (savedId || "(未設定)"));
+  } catch(e) {
+    console.log("Script Properties ERROR: " + e);
+  }
+}
