@@ -154,15 +154,85 @@ function clearConfigCache_() {
   configCache_ = null;
 }
 
+/** ========== AI / Config helpers（統合パッチ） ========== */
+
+/**
+ * 01_Settings を Key-Value（A列=key, B列=value）として読む
+ */
+function getConfigKV_() {
+  const out = {};
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName("01_Settings");
+  if (!sh) return out;
+
+  const last = sh.getLastRow();
+  if (last < 1) return out;
+
+  const values = sh.getRange(1, 1, last, 2).getValues();
+  values.forEach(([k, v]) => {
+    const key = String(k || "").trim();
+    if (!key) return;
+    out[key] = v;
+  });
+  return out;
+}
+
+/**
+ * OpenAI APIキーを取得（優先順位: Props > Settings KV > B26互換）
+ * @return {string}
+ */
+function getOpenAiApiKey_() {
+  // 1. Script Properties
+  const props = PropertiesService.getScriptProperties();
+  const pv = props.getProperty("OPENAI_API_KEY");
+  if (pv) return pv;
+
+  // 2. 01_Settings Key-Value
+  const cfg = getConfigKV_();
+  if (cfg.OPENAI_API_KEY) return String(cfg.OPENAI_API_KEY).trim();
+
+  // 3. 互換：B26 を読む（暫定）
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName("01_Settings");
+  if (sh) {
+    const v26 = String(sh.getRange("B26").getValue() || "").trim();
+    if (v26) return v26;
+  }
+  return "";
+}
+
+/**
+ * OpenAIモデル名を取得
+ * @return {string}
+ */
+function getOpenAiModel_() {
+  const cfg = getConfigKV_();
+  return cfg.OPENAI_MODEL || PropertiesService.getScriptProperties().getProperty("OPENAI_MODEL") || "gpt-4o-mini";
+}
+
 /** ========== Phase 7: AI/OCRモード設定 ========== */
 
 /**
- * AIが有効かどうか
+ * AIが有効かどうか（Props優先）
  * @return {boolean}
  */
 function isAiEnabled_() {
-  const cfg = loadConfig_();
-  return !!cfg.AI_ENABLED;
+  // 1. Script Properties
+  const props = PropertiesService.getScriptProperties();
+  const pv = props.getProperty("AI_ENABLED");
+  if (pv !== null && pv !== undefined && pv !== "") {
+    return String(pv).toLowerCase() === "true";
+  }
+
+  // 2. 01_Settings Key-Value
+  const cfg = getConfigKV_();
+  if (cfg.AI_ENABLED !== undefined) {
+    return String(cfg.AI_ENABLED).toLowerCase() === "true";
+  }
+
+  // 3. loadConfig_ フォールバック
+  const cfgLegacy = loadConfig_();
+  return !!cfgLegacy.AI_ENABLED;
 }
 
 /**

@@ -323,6 +323,84 @@ function getTransactionAiSchema_() {
   };
 }
 
+/** ========== Smart Input用 Chat Completions API ========== */
+
+/**
+ * OpenAI Chat Completions APIを呼び出し、JSONを返す（processSmartInput用）
+ * @param {Array} messages [{role,content},...]
+ * @param {Object} schemaHint 期待するJSONの形式（プロンプト補強用）
+ * @param {string} traceId
+ * @return {Object} パースされたJSON
+ */
+function callOpenAiJson_(messages, schemaHint, traceId) {
+  const apiKey = getOpenAiApiKey_();
+  if (!apiKey) {
+    throw makeAppError_("E_AI_KEY_MISSING", "OPENAI_API_KEY missing", traceId, false,
+      "AIキーが未設定です。設定を確認してください。");
+  }
+
+  const model = getOpenAiModel_();
+  const url = "https://api.openai.com/v1/chat/completions";
+
+  const payload = {
+    model,
+    messages,
+    temperature: 0.2
+  };
+
+  const res = UrlFetchApp.fetch(url, {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify(payload),
+    headers: { Authorization: "Bearer " + apiKey },
+    muteHttpExceptions: true
+  });
+
+  const code = res.getResponseCode();
+  const text = res.getContentText();
+
+  if (code >= 400) {
+    throw makeAppError_("E_AI_CALL_FAILED", `OpenAI error ${code}: ${text}`, traceId, true,
+      "AI呼び出しに失敗しました。しばらくしてから再度お試しください。");
+  }
+
+  const json = JSON.parse(text);
+  const content = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
+  if (!content) {
+    throw makeAppError_("E_AI_EMPTY", "Empty AI response", traceId, true, "AIの応答が空でした。");
+  }
+
+  // AIに「JSONだけ返せ」を要求しているので、最初のJSONブロックを抽出
+  const parsed = safeParseJsonFromText_(content);
+  if (!parsed) {
+    throw makeAppError_("E_AI_PARSE_FAILED", "Failed to parse JSON from AI response: " + content, traceId, true,
+      "AIの結果解析に失敗しました。");
+  }
+  return parsed;
+}
+
+/**
+ * テキストからJSONを安全にパース（マークダウンコードブロック対応）
+ */
+function safeParseJsonFromText_(txt) {
+  try {
+    return JSON.parse(txt);
+  } catch (e) {
+    // ```json ... ``` を剥がす
+    const m = txt.match(/```json([\s\S]*?)```/i) || txt.match(/```([\s\S]*?)```/);
+    if (m) {
+      try { return JSON.parse(m[1].trim()); } catch (_) {}
+    }
+    // 最初の { から最後の } を拾う
+    const i = txt.indexOf("{");
+    const j = txt.lastIndexOf("}");
+    if (i >= 0 && j > i) {
+      try { return JSON.parse(txt.slice(i, j + 1)); } catch (_) {}
+    }
+    return null;
+  }
+}
+
 /** ---------- props/util ---------- */
 
 function getRequiredProp_(key) {

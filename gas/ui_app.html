@@ -368,6 +368,128 @@
     if ($("voiceBox")) $("voiceBox").style.display = "none";
   }
 
+  /* ========== AI受付 ========== */
+
+  let LAST_DRAFT = null;
+
+  /**
+   * AI状態を確認
+   */
+  function checkAiStatus_() {
+    const el = $("aiStatus");
+    if (el) el.textContent = "確認中…";
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (!res || !res.ok) {
+          if (el) el.textContent = "AI状態取得に失敗しました";
+          return;
+        }
+        const r = res.result;
+        if (el) el.textContent = `AI_ENABLED=${r.aiEnabled} / KEY=${r.hasKey} / source=${r.keySource} / model=${r.modelText}`;
+      })
+      .withFailureHandler((e) => {
+        if (el) el.textContent = "AI状態取得エラー: " + (e && e.message ? e.message : String(e));
+      })
+      .debugAiStatus();
+  }
+
+  /**
+   * Smart入力（AI解析）
+   */
+  function runSmartInput_() {
+    const t = ($("smartText")?.value || "").trim();
+    if (!t) {
+      setHomeStatus("入力してください");
+      return;
+    }
+
+    setHomeStatus("AI解析中…");
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (!res || !res.ok) {
+          setHomeStatus("AI解析に失敗しました（手入力で続行できます）");
+          return;
+        }
+        LAST_DRAFT = res.result.draft;
+        showPreview_(LAST_DRAFT, res.result.aiUsed);
+        setHomeStatus("AIプレビューを確認してください");
+      })
+      .withFailureHandler((e) => {
+        setHomeStatus("AI解析エラー: " + (e && e.message ? e.message : String(e)));
+      })
+      .processSmartInput(t, clientContext_());
+  }
+
+  /**
+   * プレビュー表示
+   */
+  function showPreview_(draft, aiUsed) {
+    const card = $("previewCard");
+    const body = $("previewBody");
+    const hint = $("previewHint");
+
+    if (!card || !body) return;
+
+    const rows = [
+      ["日付", draft.date || ""],
+      ["金額", draft.amount || 0],
+      ["店名/内容", draft.merchant || ""],
+      ["カテゴリ", draft.category || "(未設定)"],
+      ["支払方法", draft.payment_method || "(未設定)"],
+      ["メモ", (draft.memo || "").slice(0, 200)]
+    ];
+
+    body.innerHTML = rows.map(([k, v]) => {
+      return `<div class="kv"><div class="k">${escapeHtml_(k)}</div><div class="v">${escapeHtml_(String(v))}</div></div>`;
+    }).join("");
+
+    if (hint) {
+      hint.textContent = aiUsed
+        ? "AI推定結果です。必要に応じて修正してください。"
+        : "AI無効のため簡易推定です。フォームで修正してください。";
+    }
+
+    card.style.display = "block";
+    card.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  /**
+   * プレビューを非表示
+   */
+  function hidePreview_() {
+    const card = $("previewCard");
+    if (card) card.style.display = "none";
+  }
+
+  /**
+   * プレビュー確定 -> フォームに反映
+   */
+  function acceptPreview_() {
+    if (!LAST_DRAFT) return;
+    applyDraftToHomeForm_(LAST_DRAFT);
+    hidePreview_();
+
+    // フォーム位置へスクロール
+    const formTop = $("inputDate") || document.body;
+    formTop.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    setHomeStatus("フォームに反映しました。確認して「確定して保存」を押してください");
+  }
+
+  /**
+   * HTML特殊文字エスケープ
+   */
+  function escapeHtml_(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
   /* ========== 入力タブ（手入力専用） ========== */
 
   /**

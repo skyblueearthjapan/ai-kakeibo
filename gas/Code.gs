@@ -889,3 +889,165 @@ function getUiMasterData() {
     return makeErrResult_(err, traceId, started);
   }
 }
+
+/** ========== AI有効化パッチ ========== */
+
+/**
+ * UI -> GAS: AI状態をデバッグ表示
+ * @return {Object}
+ */
+function debugAiStatus() {
+  const traceId = makeTraceId_();
+  const key = getOpenAiApiKey_();
+  const enabled = isAiEnabled_();
+
+  let source = "none";
+  const propsKey = PropertiesService.getScriptProperties().getProperty("OPENAI_API_KEY");
+  if (propsKey) {
+    source = "props";
+  } else {
+    const cfg = getConfigKV_();
+    if (cfg.OPENAI_API_KEY) {
+      source = "settings_kv";
+    } else {
+      source = "settings_cell_or_none";
+    }
+  }
+
+  return {
+    ok: true,
+    result: {
+      aiEnabled: enabled,
+      hasKey: !!key,
+      keySource: source,
+      modelText: getOpenAiModel_(),
+      traceId
+    }
+  };
+}
+
+/**
+ * UI -> GAS: Home smart input（テキスト -> draft）
+ * @param {string} text ユーザー入力（例：「すき家 2000円」）
+ * @param {Object=} clientContext
+ * @return {Object} { ok, result: { draft, aiUsed } }
+ */
+function processSmartInput(text, clientContext) {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    const ui = getUiMasterData().result;
+
+    // AI usable?
+    const canAi = isAiEnabled_() && !!getOpenAiApiKey_();
+
+    let draft;
+    if (canAi) {
+      draft = aiDraftFromText_(String(text || ""), ui, traceId);
+      draft.source = "ai";
+    } else {
+      draft = ruleDraftFromText_(String(text || ""), ui);
+      draft.source = "manual_rule";
+      draft.explanation = "AIが無効のため、簡易ルールで推定しました。必要に応じて修正してください。";
+      draft.confidence = 0.2;
+    }
+
+    logSuccess_(traceId, "processSmartInput", Date.now() - started, { aiUsed: canAi });
+
+    return { ok: true, result: { draft, traceId, aiUsed: canAi } };
+
+  } catch (e) {
+    logError_(traceId, "processSmartInput", Date.now() - started, normalizeError_(e, traceId).code, String(e), {});
+
+    // エラーでも手入力に落とせるよう、UIに説明を返す
+    const msg = (e && e.userMessage) ? e.userMessage : "AI処理でエラーが発生しました。手入力で登録してください。";
+    return { ok: false, error: { message: msg, detail: String(e), traceId } };
+  }
+}
+
+/**
+ * AI draft builder（OpenAI呼び出し）
+ */
+function aiDraftFromText_(text, ui, traceId) {
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+
+  const schemaHint = {
+    date: "YYYY-MM-DD",
+    amount: 0,
+    merchant: "",
+    category: "",
+    payment_method: "",
+    memo: "",
+    confidence: 0.0,
+    needs_confirmation: true,
+    explanation: ""
+  };
+
+  const sys = [
+    "You are an assistant that extracts a household expense transaction from Japanese user text.",
+    "Return ONLY valid JSON (no markdown).",
+    "Choose category/payment_method ONLY from provided lists if possible; otherwise empty string.",
+    "If amount is unclear, set amount=0 and needs_confirmation=true.",
+  ].join(" ");
+
+  const user = {
+    instruction: "Extract transaction fields.",
+    input_text: text,
+    today,
+    allowed_categories: ui.categories || [],
+    allowed_payment_methods: ui.paymentMethods || [],
+    output_schema: schemaHint
+  };
+
+  const messages = [
+    { role: "system", content: sys },
+    { role: "user", content: JSON.stringify(user) }
+  ];
+
+  const parsed = callOpenAiJson_(messages, schemaHint, traceId);
+
+  // normalize
+  return {
+    date: String(parsed.date || today).slice(0, 10),
+    amount: Number(parsed.amount || 0),
+    merchant: String(parsed.merchant || ""),
+    category: String(parsed.category || ""),
+    payment_method: String(parsed.payment_method || ""),
+    memo: String(parsed.memo || text || ""),
+    raw_text: text,
+    confidence: Number(parsed.confidence || 0.4),
+    needs_confirmation: parsed.needs_confirmation !== false,
+    explanation: String(parsed.explanation || "")
+  };
+}
+
+/**
+ * Rule-based draft (fallback)
+ */
+function ruleDraftFromText_(text, ui) {
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+  const t = String(text || "").trim();
+
+  // amount: "2000円" "二千円" はまず数字だけを拾う簡易版（漢数字は後で拡張）
+  let amount = 0;
+  const m = t.match(/(\d{1,7})\s*(円|えん)/);
+  if (m) amount = Number(m[1]);
+
+  // merchant: amount前まで
+  let merchant = t;
+  if (m && m.index !== undefined) merchant = t.slice(0, m.index).trim();
+
+  return {
+    date: today,
+    amount,
+    merchant,
+    category: "",
+    payment_method: "",
+    memo: t,
+    raw_text: t,
+    confidence: 0.2,
+    needs_confirmation: true,
+    explanation: "簡易推定（AI無効/未設定）"
+  };
+}
