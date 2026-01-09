@@ -895,8 +895,8 @@ function getAccounts() {
 }
 
 /**
- * UIマスタデータを取得（01_Settingsシートから）
- * Phase8: カテゴリ・支払方法をシートから読み込む
+ * UIマスタデータを取得（02_Masterシートから）
+ * Phase9: カテゴリ・支払方法をマスタシートから読み込む（設定値との分離）
  * @return {Object} { ok, result: { categories, paymentMethods, subcategoriesByCategory } }
  */
 function getUiMasterData() {
@@ -904,40 +904,26 @@ function getUiMasterData() {
   const started = Date.now();
 
   try {
-    // getSs_ を使用（openById経由・WebApp安全）
-    const ss = getSs_();
+    // マスタシートを確保（なければ作成）
+    ensureMasterSheets_();
 
-    // 01_Settings シートから読み込み
-    const settingsSheet = ss.getSheetByName("01_Settings");
-    let categories = [];
-    let paymentMethods = [];
+    // 02_Master からカテゴリ・支払方法を取得
+    let categories = listMasters_("CATEGORY");
+    let paymentMethods = listMasters_("PAYMENT");
 
-    if (settingsSheet) {
-      const lastRow = settingsSheet.getLastRow();
-
-      // カテゴリ: A9:A（A列の9行目以降）
-      if (lastRow >= 9) {
-        const catValues = settingsSheet.getRange(9, 1, lastRow - 8, 1).getValues();
-        categories = catValues.flat().filter(v => v && String(v).trim()).map(String);
-      }
-
-      // 支払方法: C9:C（C列の9行目以降）
-      if (lastRow >= 9) {
-        const payValues = settingsSheet.getRange(9, 3, lastRow - 8, 1).getValues();
-        paymentMethods = payValues.flat().filter(v => v && String(v).trim()).map(String);
-      }
-    }
-
-    // デフォルト値（シートが空の場合）
+    // デフォルト値（マスタが空の場合）
     if (categories.length === 0) {
-      categories = ["食費", "日用品", "住居", "光熱費", "通信", "交通", "医療", "教育", "娯楽", "交際", "その他"];
+      ensureDefaultMasters_();
+      categories = listMasters_("CATEGORY");
     }
 
     if (paymentMethods.length === 0) {
-      paymentMethods = ["現金", "クレジットカード", "デビット", "QR/電子マネー", "口座振替", "振込", "ポイント"];
+      ensureDefaultMasters_();
+      paymentMethods = listMasters_("PAYMENT");
     }
 
     // 02_Categories からサブカテゴリマップを構築（あれば）
+    const ss = getSs_();
     const subcategoriesByCategory = {};
     const catSheet = ss.getSheetByName("02_Categories");
     if (catSheet) {

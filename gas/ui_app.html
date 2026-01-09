@@ -1610,4 +1610,278 @@
       })
       .debugAiStatus();
   }
+
+  /* ========== マスタ編集モーダル ========== */
+
+  let MASTER_CATEGORIES = [];
+  let MASTER_PAYMENTS = [];
+
+  /**
+   * マスタ編集モーダルを開く
+   */
+  function openMasterModal() {
+    const modal = $("masterModal");
+    if (modal) modal.style.display = "flex";
+
+    // マスタデータを読み込み
+    loadMasterData();
+  }
+
+  /**
+   * マスタ編集モーダルを閉じる
+   */
+  function closeMasterModal() {
+    const modal = $("masterModal");
+    if (modal) modal.style.display = "none";
+
+    // ドロップダウンを再読み込み（変更が反映されるように）
+    reloadMasterDropdowns_();
+  }
+
+  /**
+   * マスタタブ切り替え
+   */
+  function switchMasterTab(tab) {
+    document.querySelectorAll(".master-tab").forEach(t => {
+      t.classList.toggle("active", t.dataset.master === tab);
+    });
+
+    const catSection = $("masterCategorySection");
+    const paySection = $("masterPaymentSection");
+
+    if (tab === "category") {
+      if (catSection) catSection.style.display = "block";
+      if (paySection) paySection.style.display = "none";
+    } else {
+      if (catSection) catSection.style.display = "none";
+      if (paySection) paySection.style.display = "block";
+    }
+  }
+
+  /**
+   * マスタデータを読み込み
+   */
+  function loadMasterData() {
+    setMasterStatus("読み込み中...");
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        setMasterStatus("");
+
+        if (!res || !res.ok) {
+          setMasterStatus("読み込みに失敗しました", "error");
+          return;
+        }
+
+        MASTER_CATEGORIES = res.result.categories || [];
+        MASTER_PAYMENTS = res.result.payments || [];
+
+        renderMasterList("CATEGORY", MASTER_CATEGORIES);
+        renderMasterList("PAYMENT", MASTER_PAYMENTS);
+      })
+      .withFailureHandler((e) => {
+        setMasterStatus("エラー: " + (e?.message || String(e)), "error");
+      })
+      .getMasters();
+  }
+
+  /**
+   * マスタリストを描画
+   */
+  function renderMasterList(kind, items) {
+    const listEl = $(kind === "CATEGORY" ? "masterCategoryList" : "masterPaymentList");
+    const emptyEl = $(kind === "CATEGORY" ? "masterCategoryEmpty" : "masterPaymentEmpty");
+
+    if (!listEl) return;
+
+    if (!items || items.length === 0) {
+      listEl.innerHTML = "";
+      if (emptyEl) emptyEl.style.display = "block";
+      return;
+    }
+
+    if (emptyEl) emptyEl.style.display = "none";
+
+    listEl.innerHTML = items.map(name => {
+      const safeName = escapeHtml_(name);
+      const jsonName = JSON.stringify(name).replace(/"/g, "&quot;");
+      return `
+        <div class="master-item" data-name="${safeName}">
+          <div class="master-item-name">${safeName}</div>
+          <div class="master-item-actions">
+            <button class="btn-rename" onclick="startRenameMaster('${kind}', ${jsonName})">名前変更</button>
+            <button class="btn-delete-master" onclick="confirmDeleteMaster('${kind}', ${jsonName})">削除</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  /**
+   * マスタを追加
+   */
+  function addMasterItem(kind) {
+    const inputEl = $(kind === "CATEGORY" ? "newCategoryName" : "newPaymentName");
+    const name = inputEl?.value?.trim();
+
+    if (!name) {
+      setMasterStatus("名前を入力してください", "error");
+      return;
+    }
+
+    setMasterStatus("追加中...");
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (!res || !res.ok) {
+          setMasterStatus("追加に失敗しました: " + (res?.error?.message || ""), "error");
+          return;
+        }
+
+        setMasterStatus("追加しました", "success");
+        if (inputEl) inputEl.value = "";
+
+        // リスト再読み込み
+        loadMasterData();
+      })
+      .withFailureHandler((e) => {
+        setMasterStatus("エラー: " + (e?.message || String(e)), "error");
+      })
+      .addMaster(kind, name);
+  }
+
+  /**
+   * 名前変更モードを開始
+   */
+  function startRenameMaster(kind, oldName) {
+    const listEl = $(kind === "CATEGORY" ? "masterCategoryList" : "masterPaymentList");
+    if (!listEl) return;
+
+    // 対象のmaster-itemを検索
+    const items = listEl.querySelectorAll(".master-item");
+    items.forEach(item => {
+      const itemName = item.dataset.name;
+      if (itemName === oldName) {
+        const nameDiv = item.querySelector(".master-item-name");
+        const actionsDiv = item.querySelector(".master-item-actions");
+
+        // 入力フィールドに置き換え
+        nameDiv.innerHTML = `<input type="text" value="${escapeHtml_(oldName)}" data-old="${escapeHtml_(oldName)}">`;
+        const input = nameDiv.querySelector("input");
+        input.focus();
+        input.select();
+
+        // ボタンを保存/キャンセルに変更
+        actionsDiv.innerHTML = `
+          <button class="btn-save-rename" onclick="saveRenameMaster('${kind}', this)">保存</button>
+          <button class="btn-cancel-rename" onclick="cancelRenameMaster('${kind}')">取消</button>
+        `;
+      }
+    });
+  }
+
+  /**
+   * 名前変更を保存
+   */
+  function saveRenameMaster(kind, btnEl) {
+    const item = btnEl.closest(".master-item");
+    const input = item.querySelector(".master-item-name input");
+    const oldName = input.dataset.old;
+    const newName = input.value.trim();
+
+    if (!newName) {
+      setMasterStatus("名前を入力してください", "error");
+      return;
+    }
+
+    if (oldName === newName) {
+      // 変更なし
+      loadMasterData();
+      return;
+    }
+
+    setMasterStatus("保存中...");
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (!res || !res.ok) {
+          setMasterStatus("保存に失敗しました: " + (res?.error?.message || ""), "error");
+          return;
+        }
+
+        setMasterStatus("保存しました（取引データも更新済み）", "success");
+        loadMasterData();
+      })
+      .withFailureHandler((e) => {
+        setMasterStatus("エラー: " + (e?.message || String(e)), "error");
+      })
+      .renameMaster(kind, oldName, newName, true);  // propagate=true
+  }
+
+  /**
+   * 名前変更をキャンセル
+   */
+  function cancelRenameMaster(kind) {
+    loadMasterData();  // 元に戻す
+  }
+
+  /**
+   * マスタ削除の確認
+   */
+  function confirmDeleteMaster(kind, name) {
+    const kindLabel = kind === "CATEGORY" ? "カテゴリ" : "支払方法";
+    if (!confirm(`「${name}」を削除しますか？\n（過去の取引データには影響しません）`)) return;
+
+    setMasterStatus("削除中...");
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (!res || !res.ok) {
+          setMasterStatus("削除に失敗しました: " + (res?.error?.message || ""), "error");
+          return;
+        }
+
+        setMasterStatus("削除しました", "success");
+        loadMasterData();
+      })
+      .withFailureHandler((e) => {
+        setMasterStatus("エラー: " + (e?.message || String(e)), "error");
+      })
+      .deleteMaster(kind, name);
+  }
+
+  /**
+   * マスタステータス表示
+   */
+  function setMasterStatus(msg, type) {
+    const el = $("masterStatus");
+    if (el) {
+      el.textContent = msg;
+      el.className = "hint " + (type || "");
+    }
+  }
+
+  /**
+   * マスタ変更後にドロップダウンを再読み込み
+   */
+  function reloadMasterDropdowns_() {
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (!res || !res.ok) return;
+
+        MASTER = res.result;
+
+        // ホームタブのselect
+        fillSelect_($("inputCategory"), MASTER.categories, "カテゴリを選択");
+        fillSelect_($("inputPayment"), MASTER.paymentMethods, "支払方法を選択");
+
+        // 履歴タブのフィルターselect
+        fillSelect_($("categoryFilter"), MASTER.categories, "カテゴリ");
+        fillSelect_($("paymentFilter"), MASTER.paymentMethods, "支払方法");
+      })
+      .withFailureHandler((e) => {
+        console.error("Failed to reload master dropdowns:", e);
+      })
+      .getUiMasterData();
+  }
 </script>

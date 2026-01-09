@@ -1210,4 +1210,134 @@
     padding-top: 12px;
     border-top: 1px solid rgba(17, 24, 39, 0.08);
   }
+
+  /* ========== 履歴アクション ========== */
+  .history-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  .btn-master {
+    background: var(--lav);
+    color: #6D28D9;
+  }
+
+  /* ========== マスタ編集モーダル ========== */
+  .modal-large {
+    max-height: 85vh;
+  }
+
+  .master-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .master-tab {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 10px;
+    background: rgba(17, 24, 39, 0.06);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+  }
+
+  .master-tab.active {
+    background: #6366F1;
+    color: #fff;
+  }
+
+  .master-section {
+    padding: 0;
+  }
+
+  .master-add-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .master-add-row input {
+    flex: 1;
+  }
+
+  .master-add-row .btn {
+    width: auto;
+    margin-top: 0;
+    padding: 0 16px;
+    height: auto;
+  }
+
+  .master-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .master-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: #fff;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    border-radius: 10px;
+  }
+
+  .master-item-name {
+    flex: 1;
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  .master-item-name input {
+    width: 100%;
+    border: 1px solid #6366F1;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .master-item-actions {
+    display: flex;
+    gap: 6px;
+    margin-left: 8px;
+  }
+
+  .master-item-actions button {
+    padding: 4px 10px;
+    border: none;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-rename {
+    background: var(--blue);
+    color: #1E40AF;
+  }
+
+  .btn-delete-master {
+    background: var(--pink);
+    color: #BE185D;
+  }
+
+  .btn-save-rename {
+    background: var(--mint);
+    color: #047857;
+  }
+
+  .btn-cancel-rename {
+    background: rgba(17, 24, 39, 0.08);
+    color: var(--muted);
+  }
 </style>

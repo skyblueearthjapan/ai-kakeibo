@@ -144,7 +144,10 @@
           <span id="currentMonth">2026-01</span>
           <button class="btn-small" onclick="changeMonth(1)">&gt;</button>
         </div>
-        <button class="btn-small" onclick="loadHistory()">更新</button>
+        <div class="history-actions">
+          <button class="btn-small btn-master" onclick="openMasterModal()">マスタ編集</button>
+          <button class="btn-small" onclick="loadHistory()">更新</button>
+        </div>
       </div>
       <!-- 検索フィルター -->
       <div class="filter-row">
@@ -412,6 +415,48 @@
       <div class="modal-footer">
         <button class="btn secondary" onclick="closeEditModal()">キャンセル</button>
         <button id="btnSaveEdit" class="btn primary" onclick="saveEdit()">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- マスタ編集モーダル -->
+  <div id="masterModal" class="modal" style="display:none;">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h3>マスタ編集</h3>
+        <button class="modal-close" onclick="closeMasterModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- タブ切り替え -->
+        <div class="master-tabs">
+          <button class="master-tab active" data-master="category" onclick="switchMasterTab('category')">カテゴリ</button>
+          <button class="master-tab" data-master="payment" onclick="switchMasterTab('payment')">支払方法</button>
+        </div>
+
+        <!-- カテゴリ一覧 -->
+        <div id="masterCategorySection" class="master-section">
+          <div class="master-add-row">
+            <input type="text" id="newCategoryName" class="form-input" placeholder="新しいカテゴリ名">
+            <button class="btn primary btn-small" onclick="addMasterItem('CATEGORY')">追加</button>
+          </div>
+          <div id="masterCategoryList" class="master-list"></div>
+          <div id="masterCategoryEmpty" class="empty-message" style="display:none;">カテゴリがありません</div>
+        </div>
+
+        <!-- 支払方法一覧 -->
+        <div id="masterPaymentSection" class="master-section" style="display:none;">
+          <div class="master-add-row">
+            <input type="text" id="newPaymentName" class="form-input" placeholder="新しい支払方法名">
+            <button class="btn primary btn-small" onclick="addMasterItem('PAYMENT')">追加</button>
+          </div>
+          <div id="masterPaymentList" class="master-list"></div>
+          <div id="masterPaymentEmpty" class="empty-message" style="display:none;">支払方法がありません</div>
+        </div>
+
+        <div id="masterStatus" class="hint"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary" onclick="closeMasterModal()">閉じる</button>
       </div>
     </div>
   </div>
