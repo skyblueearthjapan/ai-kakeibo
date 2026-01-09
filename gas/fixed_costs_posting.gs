@@ -170,10 +170,13 @@ function listActiveFixedCosts_(traceId) {
 
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) {
+    Logger.log("[" + traceId + "] 07_FixedCosts データなし（ヘッダのみ）");
     return [];
   }
 
-  const headers = data[0];
+  const headers = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
+  Logger.log("[" + traceId + "] 07_FixedCosts ヘッダ: " + headers.join(", "));
+
   const idxId = headers.indexOf("id");
   const idxName = headers.indexOf("name");
   const idxAmount = headers.indexOf("amount");
@@ -182,24 +185,46 @@ function listActiveFixedCosts_(traceId) {
   const idxActive = headers.indexOf("active");
   const idxMemo = headers.indexOf("memo");
 
+  Logger.log("[" + traceId + "] カラムインデックス: id=" + idxId + ", name=" + idxName + ", amount=" + idxAmount + ", active=" + idxActive);
+
   const results = [];
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
-    var active = row[idxActive];
+    var activeRaw = row[idxActive];
+    var activeStr = String(activeRaw).toUpperCase().trim();
 
-    // active=TRUE のみ
-    if (active === true || active === "TRUE" || active === "true" || active === 1) {
+    // active判定: TRUE, true, 1, チェックボックスON(boolean true) を有効とみなす
+    // FALSE, false, 0, 空, チェックボックスOFF(boolean false) は無効
+    var isActive = (activeRaw === true) ||
+                   (activeStr === "TRUE") ||
+                   (activeStr === "1") ||
+                   (activeStr === "YES") ||
+                   (activeStr === "ON");
+
+    Logger.log("[" + traceId + "] 行" + (i+1) + ": " + row[idxName] + " active=" + activeRaw + " (" + typeof activeRaw + ") -> isActive=" + isActive);
+
+    if (isActive) {
+      var id = String(row[idxId] || "").trim();
+      var name = String(row[idxName] || "").trim();
+      var amount = Number(row[idxAmount]) || 0;
+
+      if (!id || !name || amount <= 0) {
+        Logger.log("[" + traceId + "] スキップ（無効データ）: id=" + id + ", name=" + name + ", amount=" + amount);
+        continue;
+      }
+
       results.push({
-        id: row[idxId],
-        name: row[idxName],
-        amount: Number(row[idxAmount]) || 0,
-        category: row[idxCategory] || "",
-        payment: row[idxPayment] || "",
-        memo: row[idxMemo] || ""
+        id: id,
+        name: name,
+        amount: amount,
+        category: String(row[idxCategory] || "").trim(),
+        payment: String(row[idxPayment] || "").trim(),
+        memo: String(row[idxMemo] || "").trim()
       });
     }
   }
 
+  Logger.log("[" + traceId + "] 有効な固定費: " + results.length + "件");
   return results;
 }
 
@@ -339,7 +364,8 @@ function ensureFixedCostsPostedForMonth_(monthStartISO) {
   // 月を解析
   const match = String(monthStartISO).match(/^(\d{4})-(\d{2})/);
   if (!match) {
-    return { posted: 0, skipped: 0 };
+    Logger.log("[" + traceId + "] 月解析失敗: " + monthStartISO);
+    return { posted: 0, skipped: 0, reason: "invalid_month" };
   }
 
   const year = parseInt(match[1], 10);
@@ -347,30 +373,36 @@ function ensureFixedCostsPostedForMonth_(monthStartISO) {
   const ym = year + "-" + String(month).padStart(2, "0");
   const postingDate = ym + "-01";
 
+  Logger.log("[" + traceId + "] 遅延起票開始: ym=" + ym);
+
   // 当月または過去月のみ起票（未来月は起票しない）
   const now = new Date();
   const targetDate = new Date(year, month - 1, 1);
   if (targetDate > now) {
+    Logger.log("[" + traceId + "] 未来月のためスキップ");
     return { posted: 0, skipped: 0, reason: "future_month" };
   }
 
-  // CacheServiceで重複実行を防止（同月の起票チェックは1時間に1回）
-  const cache = CacheService.getScriptCache();
-  const cacheKey = "fixed_costs_posted_" + ym;
-  const cached = cache.get(cacheKey);
-  if (cached === "done") {
-    return { posted: 0, skipped: 0, reason: "already_checked" };
+  // ScriptPropertiesで処理済みチェック（CacheServiceより永続的）
+  const props = PropertiesService.getScriptProperties();
+  const propKey = "FIXED_POSTED_" + ym;
+  if (props.getProperty(propKey) === "1") {
+    Logger.log("[" + traceId + "] 処理済み（ScriptProperties）: " + ym);
+    return { posted: 0, skipped: 0, reason: "already_processed" };
   }
 
   // 固定費を取得
   const fixedCosts = listActiveFixedCosts_(traceId);
+  Logger.log("[" + traceId + "] アクティブ固定費: " + fixedCosts.length + "件");
+
   if (fixedCosts.length === 0) {
-    cache.put(cacheKey, "done", 3600); // 1時間キャッシュ
+    props.setProperty(propKey, "1");
     return { posted: 0, skipped: 0, reason: "no_fixed_costs" };
   }
 
-  // 起票済みキーを収集
+  // 起票済みキーを収集（04_Transactionsのmemoから）
   const postedKeys = collectPostedFixedKeysForMonth_(ym, traceId);
+  Logger.log("[" + traceId + "] 起票済みキー: " + postedKeys.size + "件");
 
   // 未起票の固定費を起票
   let postedCount = 0;
@@ -380,6 +412,7 @@ function ensureFixedCostsPostedForMonth_(monthStartISO) {
     const dedupKey = makeFixedDedupKey_(fc.id, ym);
 
     if (postedKeys.has(dedupKey)) {
+      Logger.log("[" + traceId + "] スキップ（起票済み）: " + fc.name);
       skippedCount++;
       return;
     }
@@ -387,12 +420,14 @@ function ensureFixedCostsPostedForMonth_(monthStartISO) {
     const timestamp = new Date().toISOString();
 
     // ヘッダー駆動 appendTransactionRow_ 用のオブジェクト形式
+    // 04_Transactions のヘッダーと完全一致させる
     const rowObj = {
-      id: Utilities.getUuid(),
+      id: generateTransactionId_(),
       date: postingDate,
       type: "expense",
       amount: fc.amount,
       merchant: fc.name,
+      item: fc.name,
       category: fc.category || "",
       payment_method: fc.payment || "",
       memo: dedupKey,
@@ -402,16 +437,20 @@ function ensureFixedCostsPostedForMonth_(monthStartISO) {
       updated_at: timestamp
     };
 
-    appendTransactionRow_(rowObj, traceId);
-    postedCount++;
+    Logger.log("[" + traceId + "] 起票: " + fc.name + " ¥" + fc.amount);
+
+    try {
+      appendTransactionRow_(rowObj, traceId);
+      postedCount++;
+    } catch (e) {
+      Logger.log("[" + traceId + "] 起票エラー: " + e.message);
+    }
   });
 
-  // キャッシュに記録
-  cache.put(cacheKey, "done", 3600);
+  // 処理済みフラグをセット
+  props.setProperty(propKey, "1");
 
-  if (postedCount > 0) {
-    Logger.log("[" + traceId + "] 遅延起票完了: " + ym + " 起票=" + postedCount + "件");
-  }
+  Logger.log("[" + traceId + "] 遅延起票完了: 起票=" + postedCount + "件, スキップ=" + skippedCount + "件");
 
   return { posted: postedCount, skipped: skippedCount };
 }
@@ -424,4 +463,62 @@ function ensureFixedCostsPostedForMonth_(monthStartISO) {
 function isFixedCostTransaction_(txn) {
   const memo = String(txn.memo || "");
   return memo.indexOf("FIXED:") === 0;
+}
+
+/**
+ * 固定費の処理済みフラグをリセット（デバッグ/手動再実行用）
+ * スクリプトエディタから手動実行
+ * @param {string=} ym YYYY-MM形式（省略時は当月）
+ */
+function resetFixedCostFlag(ym) {
+  const props = PropertiesService.getScriptProperties();
+
+  if (!ym) {
+    const now = new Date();
+    ym = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+  }
+
+  const propKey = "FIXED_POSTED_" + ym;
+  props.deleteProperty(propKey);
+  Logger.log("✅ 固定費フラグをリセット: " + propKey);
+
+  // UIがあれば通知
+  try {
+    SpreadsheetApp.getUi().alert("固定費フラグをリセットしました: " + ym + "\n次回分析画面を開くと再起票されます。");
+  } catch (e) {
+    // WebAppからは呼べないので無視
+  }
+}
+
+/**
+ * 固定費の状態をデバッグ出力
+ */
+function debugFixedCosts() {
+  const now = new Date();
+  const ym = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+  const traceId = "DEBUG-" + Date.now();
+
+  Logger.log("=== 固定費デバッグ ===");
+  Logger.log("対象月: " + ym);
+
+  // ScriptProperties確認
+  const props = PropertiesService.getScriptProperties();
+  const propKey = "FIXED_POSTED_" + ym;
+  Logger.log("処理済みフラグ: " + (props.getProperty(propKey) || "未設定"));
+
+  // アクティブ固定費
+  const fixedCosts = listActiveFixedCosts_(traceId);
+  Logger.log("アクティブ固定費: " + fixedCosts.length + "件");
+  fixedCosts.forEach(function(fc) {
+    Logger.log("  - " + fc.name + " ¥" + fc.amount + " [" + fc.id + "] active=" + fc.active);
+  });
+
+  // 起票済みキー
+  const postedKeys = collectPostedFixedKeysForMonth_(ym, traceId);
+  Logger.log("起票済みキー: " + postedKeys.size + "件");
+  postedKeys.forEach(function(key) {
+    Logger.log("  - " + key);
+  });
+
+  Logger.log("======================");
 }
