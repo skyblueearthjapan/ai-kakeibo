@@ -1,101 +1,31 @@
 <script>
   const $ = (id) => document.getElementById(id);
 
-  function setBusy(isBusy) {
-    $("btnText").disabled = isBusy;
-    $("btnReceipt").disabled = isBusy;
-  }
+  // UIマスタデータ（カテゴリ/支払方法）
+  let MASTER = null;
 
-  function setStatus(msg) {
-    $("status").textContent = msg;
-  }
+  /* ========== 共通ユーティリティ ========== */
 
   /**
-   * テキスト送信
-   */
-  function sendText() {
-    const text = $("text").value.trim();
-    if (!text) {
-      setStatus("入力が空です。例：スタバ 620円 ラテ");
-      return;
-    }
-
-    setBusy(true);
-    setStatus("解析中...");
-
-    google.script.run
-      .withSuccessHandler((res) => {
-        setBusy(false);
-        setStatus(formatResult(res));
-        if (res && res.ok) {
-          $("text").value = "";
-        }
-      })
-      .withFailureHandler((e) => {
-        setBusy(false);
-        setStatus("エラー\n" + (e && e.message ? e.message : String(e)));
-      })
-      .processText(text, clientContext_());
-  }
-
-  /**
-   * レシート送信
-   */
-  async function sendReceipt() {
-    const file = $("receipt").files[0];
-    if (!file) {
-      setStatus("画像を選んでください");
-      return;
-    }
-
-    setBusy(true);
-    setStatus("画像準備中...");
-
-    try {
-      const dataUrl = await resizeImageToDataUrl_(file, 1280, 0.72);
-      setStatus("レシート解析中...");
-
-      google.script.run
-        .withSuccessHandler((res) => {
-          setBusy(false);
-          setStatus(formatResult(res));
-          if (res && res.ok) {
-            $("receipt").value = "";
-          }
-        })
-        .withFailureHandler((e) => {
-          setBusy(false);
-          setStatus("エラー\n" + (e && e.message ? e.message : String(e)));
-        })
-        .processReceipt(dataUrl, clientContext_());
-
-    } catch (err) {
-      setBusy(false);
-      setStatus("画像処理に失敗しました\n" + err);
-    }
-  }
-
-  /**
-   * クライアントコンテキスト（Phase6: client_request_id追加）
+   * クライアントコンテキスト（二重送信防止用）
    */
   function clientContext_() {
     return {
-      client_request_id: generateUUID_(), // Phase6: 二重送信防止用
+      client_request_id: generateUUID_(),
       client_time: new Date().toISOString(),
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo",
       device: "mobile",
-      ui_version: "0.6"
+      ui_version: "0.9"
     };
   }
 
   /**
-   * UUID生成（Phase6）
+   * UUID生成
    */
   function generateUUID_() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
       return crypto.randomUUID();
     }
-    // フォールバック
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c) {
       const r = Math.random() * 16 | 0;
       const v = c === "x" ? r : (r & 0x3 | 0x8);
@@ -104,68 +34,25 @@
   }
 
   /**
-   * 結果フォーマット（Phase6: fallback対応）
+   * 今日の日付をISO形式で取得
    */
-  function formatResult(res) {
-    if (!res) return "応答が空です";
-
-    if (!res.ok) {
-      return [
-        "エラー",
-        "code: " + res.error.code,
-        "message: " + res.error.user_message,
-        "trace: " + res.error.trace_id
-      ].join("\n");
-    }
-
-    const t = res.result.transaction;
-
-    // Phase6: AI失敗でも暫定保存された場合
-    const header = res.result.fallback
-      ? "暫定保存しました（AI解析失敗）"
-      : "記録しました";
-
-    const lines = [
-      header,
-      `id: ${t.id}`,
-      `date: ${t.date || "(未確定)"}`,
-      `type: ${t.type}`,
-      `amount: ${t.amount}`,
-      `category: ${t.category} / ${t.subcategory || "-"}`,
-      `merchant: ${t.merchant || "-"}`,
-      `status: ${t.status}`,
-    ];
-
-    if (res.result.clarification && res.result.clarification.needs_clarification) {
-      lines.push("\n【追加で教えてください】");
-      for (const q of res.result.clarification.questions) {
-        lines.push("- " + q);
-      }
-    }
-
-    // Phase6: fallback時の元エラー情報
-    if (res.result.fallback && res.result.original_error) {
-      lines.push("\n【エラー詳細】");
-      lines.push(res.result.original_error);
-    }
-
-    return lines.join("\n");
+  function getTodayISO_() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = ("0" + (d.getMonth() + 1)).slice(-2);
+    const day = ("0" + d.getDate()).slice(-2);
+    return `${y}-${m}-${day}`;
   }
 
   /**
    * 画像をリサイズしてdataURLに変換
-   * @param {File} file
-   * @param {number} maxSide 最大辺
-   * @param {number} quality JPEG品質
    */
   function resizeImageToDataUrl_(file, maxSide, quality) {
     return new Promise((resolve, reject) => {
       const img = new Image();
       const reader = new FileReader();
 
-      reader.onload = () => {
-        img.src = reader.result;
-      };
+      reader.onload = () => { img.src = reader.result; };
       reader.onerror = reject;
 
       img.onload = () => {
@@ -191,674 +78,39 @@
     });
   }
 
-  /* ========== Phase 3: タブ・履歴・編集 ========== */
-
-  // 現在の月（YYYY-MM-DD形式の月初）
-  let currentMonthStart = getCurrentMonthStart();
-
   /**
-   * 現在月の月初を取得
+   * selectを文字列配列で構築（[object Object]問題を解消）
    */
-  function getCurrentMonthStart() {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = ("0" + (now.getMonth() + 1)).slice(-2);
-    return `${y}-${m}-01`;
-  }
-
-  /**
-   * タブ切り替え
-   */
-  function switchTab(tabName) {
-    // タブボタンのアクティブ状態を更新
-    document.querySelectorAll(".tab").forEach(t => {
-      t.classList.toggle("active", t.dataset.tab === tabName);
-    });
-
-    // タブコンテンツの表示切り替え
-    document.querySelectorAll(".tab-content").forEach(c => {
-      c.classList.toggle("active", c.id === `tab-${tabName}`);
-    });
-
-    // 履歴タブに切り替えたら読み込み
-    if (tabName === "history") {
-      loadHistory();
-    }
-    // 分析タブに切り替えたら読み込み
-    if (tabName === "analytics") {
-      loadDashboard();
-    }
-  }
-
-  /**
-   * 月を変更
-   */
-  function changeMonth(delta) {
-    const d = new Date(currentMonthStart);
-    d.setMonth(d.getMonth() + delta);
-    const y = d.getFullYear();
-    const m = ("0" + (d.getMonth() + 1)).slice(-2);
-    currentMonthStart = `${y}-${m}-01`;
-    $("currentMonth").textContent = `${y}-${m}`;
-    loadHistory();
-  }
-
-  /**
-   * 履歴を読み込み
-   */
-  function loadHistory() {
-    const statusFilter = $("statusFilter").value;
-    const filters = {};
-    if (statusFilter) filters.status = statusFilter;
-    filters.includeUndated = true;
-
-    $("historyLoading").style.display = "block";
-    $("historyList").innerHTML = "";
-    $("historyEmpty").style.display = "none";
-    $("undatedSection").style.display = "none";
-
-    google.script.run
-      .withSuccessHandler((res) => {
-        $("historyLoading").style.display = "none";
-
-        if (!res || !res.ok) {
-          $("historyEmpty").style.display = "block";
-          $("historyEmpty").textContent = res?.error?.user_message || "読み込みに失敗しました";
-          return;
-        }
-
-        const { rows, undatedRows } = res.result;
-
-        // 未確定セクション
-        if (undatedRows && undatedRows.length > 0) {
-          $("undatedSection").style.display = "block";
-          $("undatedList").innerHTML = undatedRows.map(renderHistoryCard).join("");
-        }
-
-        // メインリスト
-        if (rows && rows.length > 0) {
-          $("historyList").innerHTML = rows.map(renderHistoryCard).join("");
-        } else if (!undatedRows || undatedRows.length === 0) {
-          $("historyEmpty").style.display = "block";
-        }
-      })
-      .withFailureHandler((e) => {
-        $("historyLoading").style.display = "none";
-        $("historyEmpty").style.display = "block";
-        $("historyEmpty").textContent = "読み込みエラー: " + (e?.message || String(e));
-      })
-      .listTransactions(currentMonthStart, filters);
-  }
-
-  /**
-   * 履歴カードをレンダリング
-   */
-  function renderHistoryCard(txn) {
-    const dateDisplay = txn.date || "日付未確定";
-    const statusLabel = {
-      confirmed: "確定",
-      pending: "未確定",
-      needs_review: "要確認"
-    }[txn.status] || txn.status;
-
-    return `
-      <div class="history-card" onclick='openEditModal(${JSON.stringify(txn).replace(/'/g, "&#39;")})'>
-        <div class="history-card-row1">
-          <span class="history-date">${dateDisplay}</span>
-          <span class="badge badge-${txn.status}">${statusLabel}</span>
-        </div>
-        <div class="history-card-row2">
-          ${txn.merchant || txn.item || "(詳細なし)"}
-        </div>
-        <div class="history-card-row3">
-          ${txn.category}${txn.subcategory ? " / " + txn.subcategory : ""}
-        </div>
-        <div class="history-amount">¥${txn.amount.toLocaleString()}</div>
-      </div>
-    `;
-  }
-
-  /**
-   * 編集モーダルを開く
-   */
-  function openEditModal(txn) {
-    $("editId").value = txn.id;
-    $("editDate").value = txn.date || "";
-    $("editAmount").value = txn.amount || "";
-    $("editCategory").value = txn.category || "";
-    $("editSubcategory").value = txn.subcategory || "";
-    $("editPaymentMethod").value = txn.payment_method || "";
-    $("editMerchant").value = txn.merchant || "";
-    $("editItem").value = txn.item || "";
-    $("editMemo").value = txn.memo || "";
-    $("editTags").value = txn.tags || "";
-    $("editStatus").value = txn.status || "pending";
-
-    $("editModal").style.display = "flex";
-  }
-
-  /**
-   * 編集モーダルを閉じる
-   */
-  function closeEditModal() {
-    $("editModal").style.display = "none";
-  }
-
-  /**
-   * 編集を保存
-   */
-  function saveEdit() {
-    const id = $("editId").value;
-    if (!id) return;
-
-    const patch = {
-      date: $("editDate").value,
-      amount: Number($("editAmount").value) || 0,
-      category: $("editCategory").value,
-      subcategory: $("editSubcategory").value,
-      payment_method: $("editPaymentMethod").value,
-      merchant: $("editMerchant").value,
-      item: $("editItem").value,
-      memo: $("editMemo").value,
-      tags: $("editTags").value,
-      status: $("editStatus").value
-    };
-
-    $("btnSaveEdit").disabled = true;
-    $("btnSaveEdit").textContent = "保存中...";
-
-    google.script.run
-      .withSuccessHandler((res) => {
-        $("btnSaveEdit").disabled = false;
-        $("btnSaveEdit").textContent = "保存";
-
-        if (res && res.ok) {
-          closeEditModal();
-          loadHistory();
-        } else {
-          alert(res?.error?.user_message || "保存に失敗しました");
-        }
-      })
-      .withFailureHandler((e) => {
-        $("btnSaveEdit").disabled = false;
-        $("btnSaveEdit").textContent = "保存";
-        alert("エラー: " + (e?.message || String(e)));
-      })
-      .updateTransaction(id, patch);
-  }
-
-  /* ========== Phase 4: ダッシュボード ========== */
-
-  // 分析用の月（履歴タブとは独立）
-  let analyticsMonthStart = getCurrentMonthStart();
-
-  // Chart.jsインスタンス
-  let categoryChartInstance = null;
-  let trendChartInstance = null;
-
-  // カテゴリ別の色パレット
-  const CATEGORY_COLORS = [
-    "#6366F1", "#EC4899", "#F59E0B", "#10B981", "#3B82F6",
-    "#8B5CF6", "#EF4444", "#14B8A6", "#F97316", "#84CC16"
-  ];
-
-  /**
-   * 分析タブの月を変更
-   */
-  function changeAnalyticsMonth(delta) {
-    const d = new Date(analyticsMonthStart);
-    d.setMonth(d.getMonth() + delta);
-    const y = d.getFullYear();
-    const m = ("0" + (d.getMonth() + 1)).slice(-2);
-    analyticsMonthStart = `${y}-${m}-01`;
-    $("analyticsMonth").textContent = `${y}-${m}`;
-    loadDashboard();
-  }
-
-  /**
-   * ダッシュボードを読み込み
-   */
-  function loadDashboard() {
-    $("kpiLoading").style.display = "block";
-
-    google.script.run
-      .withSuccessHandler((res) => {
-        $("kpiLoading").style.display = "none";
-
-        if (!res || !res.ok) {
-          console.error("Dashboard load failed:", res?.error);
-          return;
-        }
-
-        const { kpi, byCategory, trend12m, currency } = res.result;
-
-        renderKpi(kpi, currency);
-        renderCategoryChart(byCategory, currency);
-        renderTrendChart(trend12m, currency);
-
-        // Phase 5: インサイトも読み込む
-        loadInsights();
-      })
-      .withFailureHandler((e) => {
-        $("kpiLoading").style.display = "none";
-        console.error("Dashboard error:", e);
-      })
-      .getDashboard(analyticsMonthStart, {});
-  }
-
-  /**
-   * KPI表示
-   */
-  function renderKpi(kpi, currency) {
-    const fmt = (n) => {
-      if (currency === "JPY") {
-        return "¥" + n.toLocaleString();
-      }
-      return currency + " " + n.toLocaleString();
-    };
-
-    $("kpiExpense").textContent = fmt(kpi.expense);
-    $("kpiIncome").textContent = fmt(kpi.income);
-
-    const netEl = $("kpiNet");
-    netEl.textContent = fmt(kpi.net);
-    netEl.className = "kpi-value " + (kpi.net >= 0 ? "kpi-positive" : "kpi-negative");
-  }
-
-  /**
-   * カテゴリ別ドーナツチャート
-   */
-  function renderCategoryChart(byCategory, currency) {
-    const ctx = $("categoryChart").getContext("2d");
-
-    // 既存チャートを破棄
-    if (categoryChartInstance) {
-      categoryChartInstance.destroy();
-    }
-
-    if (!byCategory || byCategory.length === 0) {
-      $("categoryLegend").innerHTML = "<span class='empty-message'>データがありません</span>";
-      return;
-    }
-
-    const labels = byCategory.map(c => c.category);
-    const data = byCategory.map(c => c.amount);
-    const colors = byCategory.map((_, i) => CATEGORY_COLORS[i % CATEGORY_COLORS.length]);
-
-    categoryChartInstance = new Chart(ctx, {
-      type: "doughnut",
-      data: {
-        labels: labels,
-        datasets: [{
-          data: data,
-          backgroundColor: colors,
-          borderWidth: 0
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false }
-        }
-      }
-    });
-
-    // カスタム凡例を生成
-    const total = data.reduce((a, b) => a + b, 0);
-    const legendHtml = byCategory.map((c, i) => {
-      const pct = total > 0 ? Math.round((c.amount / total) * 100) : 0;
-      const color = CATEGORY_COLORS[i % CATEGORY_COLORS.length];
-      return `
-        <div class="legend-item">
-          <span class="legend-color" style="background:${color}"></span>
-          <span class="legend-label">${c.category}</span>
-          <span class="legend-value">${pct}%</span>
-        </div>
-      `;
-    }).join("");
-    $("categoryLegend").innerHTML = legendHtml;
-  }
-
-  /**
-   * 12ヶ月トレンド折れ線グラフ
-   */
-  function renderTrendChart(trend12m, currency) {
-    const ctx = $("trendChart").getContext("2d");
-
-    // 既存チャートを破棄
-    if (trendChartInstance) {
-      trendChartInstance.destroy();
-    }
-
-    if (!trend12m || trend12m.length === 0) {
-      return;
-    }
-
-    const labels = trend12m.map(t => {
-      const parts = t.month.split("-");
-      return `${parts[1]}月`;
-    });
-    const data = trend12m.map(t => t.expense);
-
-    trendChartInstance = new Chart(ctx, {
-      type: "line",
-      data: {
-        labels: labels,
-        datasets: [{
-          label: "支出",
-          data: data,
-          borderColor: "#6366F1",
-          backgroundColor: "rgba(99, 102, 241, 0.1)",
-          fill: true,
-          tension: 0.3,
-          pointRadius: 3,
-          pointBackgroundColor: "#6366F1"
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false }
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            ticks: {
-              callback: function(value) {
-                if (currency === "JPY") {
-                  return "¥" + value.toLocaleString();
-                }
-                return value.toLocaleString();
-              }
-            }
-          }
-        }
-      }
-    });
-  }
-
-  /* ========== Phase 5: インサイト ========== */
-
-  /**
-   * インサイトを読み込み
-   */
-  function loadInsights() {
-    $("insightsLoading").style.display = "block";
-
-    google.script.run
-      .withSuccessHandler((res) => {
-        $("insightsLoading").style.display = "none";
-
-        if (!res || !res.ok) {
-          console.error("Insights load failed:", res?.error);
-          return;
-        }
-
-        const { summary, overspendTop3, savingsTop3, fixedCost, meta } = res.result;
-        const currency = meta?.currency || "JPY";
-
-        renderMoM(summary, currency);
-        renderOverspend(overspendTop3, currency);
-        renderSavings(savingsTop3, currency);
-        renderFixedCost(fixedCost, currency);
-      })
-      .withFailureHandler((e) => {
-        $("insightsLoading").style.display = "none";
-        console.error("Insights error:", e);
-      })
-      .getInsights(analyticsMonthStart, {});
-  }
-
-  /**
-   * 前月比表示
-   */
-  function renderMoM(summary, currency) {
-    const fmt = (n) => {
-      if (currency === "JPY") {
-        return "¥" + Math.abs(n).toLocaleString();
-      }
-      return currency + " " + Math.abs(n).toLocaleString();
-    };
-
-    const deltaEl = $("momDelta");
-    const delta = summary.delta;
-    const sign = delta >= 0 ? "+" : "-";
-    deltaEl.textContent = sign + fmt(delta);
-    deltaEl.className = "mom-delta " + (delta >= 0 ? "positive" : "negative");
-
-    const pctEl = $("momPct");
-    if (summary.delta_pct !== null) {
-      const pctSign = summary.delta_pct >= 0 ? "+" : "";
-      pctEl.textContent = `（${pctSign}${summary.delta_pct}%）`;
-    } else {
-      pctEl.textContent = "";
-    }
-
-    $("momThis").textContent = fmt(summary.expense);
-    $("momPrev").textContent = fmt(summary.prev_expense);
-  }
-
-  /**
-   * 使いすぎTOP3表示
-   */
-  function renderOverspend(list, currency) {
-    const container = $("overspendList");
-    const empty = $("overspendEmpty");
-
-    if (!list || list.length === 0) {
-      container.innerHTML = "";
-      empty.style.display = "block";
-      return;
-    }
-
-    empty.style.display = "none";
-    container.innerHTML = list.map(item => {
-      const amt = currency === "JPY" ? "¥" + item.delta.toLocaleString() : currency + " " + item.delta.toLocaleString();
-      const pct = item.delta_pct !== null ? `(+${item.delta_pct}%)` : "";
-      return `
-        <div class="insight-item">
-          <span class="insight-cat">${item.category}</span>
-          <span>
-            <span class="insight-delta overspend">+${amt}</span>
-            <span class="insight-pct">${pct}</span>
-          </span>
-        </div>
-      `;
-    }).join("");
-  }
-
-  /**
-   * 節約TOP3表示
-   */
-  function renderSavings(list, currency) {
-    const container = $("savingsList");
-    const empty = $("savingsEmpty");
-
-    if (!list || list.length === 0) {
-      container.innerHTML = "";
-      empty.style.display = "block";
-      return;
-    }
-
-    empty.style.display = "none";
-    container.innerHTML = list.map(item => {
-      const amt = currency === "JPY" ? "¥" + Math.abs(item.delta).toLocaleString() : currency + " " + Math.abs(item.delta).toLocaleString();
-      const pct = item.delta_pct !== null ? `(${item.delta_pct}%)` : "";
-      return `
-        <div class="insight-item">
-          <span class="insight-cat">${item.category}</span>
-          <span>
-            <span class="insight-delta savings">-${amt}</span>
-            <span class="insight-pct">${pct}</span>
-          </span>
-        </div>
-      `;
-    }).join("");
-  }
-
-  /**
-   * 固定費比率表示
-   */
-  function renderFixedCost(fixedCost, currency) {
-    const fmt = (n) => {
-      if (currency === "JPY") {
-        return "¥" + n.toLocaleString();
-      }
-      return currency + " " + n.toLocaleString();
-    };
-
-    $("fixedRatio").textContent = fixedCost.this_ratio_pct + "%";
-    $("fixedTotal").textContent = fmt(fixedCost.this_total);
-
-    const breakdown = fixedCost.breakdown || [];
-    if (breakdown.length === 0) {
-      $("fixedBreakdown").innerHTML = "<span class='empty-message'>固定費データなし</span>";
-      return;
-    }
-
-    $("fixedBreakdown").innerHTML = breakdown.map(item => `
-      <div class="fixed-item">
-        <span class="fixed-item-cat">${item.category}</span>
-        <span class="fixed-item-amt">${fmt(item.amount)}</span>
-      </div>
-    `).join("");
-  }
-
-  /* ========== Phase 7: 選択式入力フォーム ========== */
-
-  // カテゴリ・支払方法のキャッシュ
-  let categoriesCache_ = null;
-  let accountsCache_ = null;
-
-  /**
-   * 入力タブを初期化
-   */
-  function initInputTab() {
-    // 今日の日付をセット
-    $("formDate").value = getTodayISO_();
-
-    // カテゴリと支払方法を読み込み
-    loadCategories();
-    loadAccounts();
-  }
-
-  /**
-   * 今日の日付をISO形式で取得
-   */
-  function getTodayISO_() {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = ("0" + (d.getMonth() + 1)).slice(-2);
-    const day = ("0" + d.getDate()).slice(-2);
-    return `${y}-${m}-${day}`;
-  }
-
-  /**
-   * カテゴリを読み込み
-   */
-  function loadCategories() {
-    google.script.run
-      .withSuccessHandler((res) => {
-        if (res && res.ok && res.result && res.result.categories) {
-          categoriesCache_ = res.result.categories;
-          populateCategorySelect(res.result.categories);
-        }
-      })
-      .withFailureHandler((e) => {
-        console.error("Failed to load categories:", e);
-      })
-      .getCategories();
-  }
-
-  /**
-   * カテゴリselectを構築
-   */
-  function populateCategorySelect(categories) {
-    const select = $("formCategory");
-    select.innerHTML = '<option value="">選択してください</option>';
-
-    categories.forEach(cat => {
+  function fillSelect_(selectEl, items, placeholder) {
+    if (!selectEl) return;
+    selectEl.innerHTML = "";
+
+    const ph = document.createElement("option");
+    ph.value = "";
+    ph.textContent = placeholder || "選択してください";
+    selectEl.appendChild(ph);
+
+    items.forEach(item => {
+      // itemがobjectでも安全に文字列を取り出す
+      const label = (typeof item === "string") ? item : (item.label || item.name || item.category || item.value || String(item));
+      const value = (typeof item === "string") ? item : (item.value || item.id || label);
+
+      if (!label) return;
       const opt = document.createElement("option");
-      opt.value = cat;
-      opt.textContent = cat;
-      select.appendChild(opt);
+      opt.value = value;
+      opt.textContent = label; // ここで必ず文字列
+      selectEl.appendChild(opt);
     });
   }
 
-  /**
-   * 支払方法を読み込み
-   */
-  function loadAccounts() {
-    google.script.run
-      .withSuccessHandler((res) => {
-        if (res && res.ok && res.result && res.result.accounts) {
-          accountsCache_ = res.result.accounts;
-          populateAccountSelect(res.result.accounts);
-        }
-      })
-      .withFailureHandler((e) => {
-        console.error("Failed to load accounts:", e);
-      })
-      .getAccounts();
-  }
+  /* ========== ホームタブ（カメラ/音声/フォーム統合） ========== */
 
   /**
-   * 支払方法selectを構築
+   * ホームステータス表示
    */
-  function populateAccountSelect(accounts) {
-    const select = $("formPayment");
-    select.innerHTML = '<option value="">選択してください</option>';
-
-    accounts.forEach(acc => {
-      const opt = document.createElement("option");
-      opt.value = acc;
-      opt.textContent = acc;
-      select.appendChild(opt);
-    });
-  }
-
-  /**
-   * レシートをOCRスキャン
-   */
-  async function scanReceipt() {
-    const file = $("receiptV2").files[0];
-    if (!file) {
-      setOcrStatus("画像を選んでください", "error");
-      return;
-    }
-
-    $("btnOcr").disabled = true;
-    setOcrStatus("画像準備中...", "processing");
-
-    try {
-      const dataUrl = await resizeImageToDataUrl_(file, 1280, 0.72);
-      setOcrStatus("OCR解析中...", "processing");
-
-      google.script.run
-        .withSuccessHandler((res) => {
-          $("btnOcr").disabled = false;
-
-          if (!res || !res.ok) {
-            setOcrStatus(res?.error?.user_message || "OCR処理に失敗しました", "error");
-            return;
-          }
-
-          const draft = res.result.draft;
-          populateFormFromDraft(draft);
-          setOcrStatus("読み取り完了！内容を確認してください", "success");
-        })
-        .withFailureHandler((e) => {
-          $("btnOcr").disabled = false;
-          setOcrStatus("エラー: " + (e?.message || String(e)), "error");
-        })
-        .processReceiptV2(dataUrl, clientContext_());
-
-    } catch (err) {
-      $("btnOcr").disabled = false;
-      setOcrStatus("画像処理に失敗しました: " + err, "error");
-    }
+  function setHomeStatus(msg) {
+    const el = $("homeStatus");
+    if (el) el.textContent = msg;
   }
 
   /**
@@ -866,115 +118,14 @@
    */
   function setOcrStatus(msg, type) {
     const el = $("ocrStatus");
-    el.textContent = msg;
-    el.className = "hint " + (type || "");
-  }
-
-  /**
-   * ドラフトからフォームに反映
-   */
-  function populateFormFromDraft(draft) {
-    if (!draft) return;
-
-    if (draft.date) {
-      $("formDate").value = draft.date;
-    }
-    if (draft.amount) {
-      $("formAmount").value = draft.amount;
-    }
-    if (draft.merchant) {
-      $("formMerchant").value = draft.merchant;
-    }
-    if (draft.category) {
-      $("formCategory").value = draft.category;
-    }
-    if (draft.payment_method) {
-      $("formPayment").value = draft.payment_method;
-    }
-    if (draft.memo) {
-      $("formMemo").value = draft.memo;
+    if (el) {
+      el.textContent = msg;
+      el.className = "hint " + (type || "");
     }
   }
 
   /**
-   * フォームをクリア
-   */
-  function clearForm() {
-    $("formDate").value = getTodayISO_();
-    $("formAmount").value = "";
-    $("formMerchant").value = "";
-    $("formCategory").value = "";
-    $("formPayment").value = "";
-    $("formMemo").value = "";
-    $("receiptV2").value = "";
-    setOcrStatus("", "");
-    setFormStatus("入力してください");
-  }
-
-  /**
-   * フォームステータス表示
-   */
-  function setFormStatus(msg) {
-    $("formStatus").textContent = msg;
-  }
-
-  /**
-   * ドラフトを保存
-   */
-  function saveDraft() {
-    const amount = Number($("formAmount").value);
-    if (!amount || amount <= 0) {
-      setFormStatus("金額を入力してください");
-      return;
-    }
-
-    const draft = {
-      date: $("formDate").value || getTodayISO_(),
-      amount: amount,
-      merchant: $("formMerchant").value,
-      category: $("formCategory").value,
-      subcategory: "",
-      payment_method: $("formPayment").value,
-      memo: $("formMemo").value,
-      raw_text: "",
-      confidence: 0
-    };
-
-    $("btnSaveDraft").disabled = true;
-    setFormStatus("保存中...");
-
-    google.script.run
-      .withSuccessHandler((res) => {
-        $("btnSaveDraft").disabled = false;
-
-        if (!res || !res.ok) {
-          setFormStatus("保存失敗: " + (res?.error?.user_message || "エラー"));
-          return;
-        }
-
-        const t = res.result.transaction;
-        setFormStatus(`保存しました (ID: ${t.id})`);
-
-        // フォームをクリア
-        setTimeout(() => {
-          clearForm();
-        }, 1500);
-      })
-      .withFailureHandler((e) => {
-        $("btnSaveDraft").disabled = false;
-        setFormStatus("エラー: " + (e?.message || String(e)));
-      })
-      .saveTransactionDraft(draft, clientContext_());
-  }
-
-  /* ========== Phase 8: カメラ/音声入力 ========== */
-
-  // 音声認識インスタンス
-  let recognition = null;
-  let listening = false;
-
-  /**
-   * カメラ/写真からのファイル処理
+   * カメラ/写真からのファイル処理 → フォームに反映
    */
   async function handleReceiptFile_(file, source) {
     if (!file) return;
@@ -988,11 +139,11 @@
       google.script.run
         .withSuccessHandler((res) => {
           if (!res || !res.ok) {
-            setOcrStatus("解析に失敗しました", "error");
+            setOcrStatus("解析に失敗しました。手入力してください。", "error");
             return;
           }
-          populateFormFromDraft(res.result.draft);
-          setOcrStatus("読み取り完了！内容を確認してください", "success");
+          applyDraftToHomeForm_(res.result.draft);
+          setOcrStatus("読み取り完了！内容を確認して保存してください", "success");
         })
         .withFailureHandler((err) => {
           setOcrStatus("エラー: " + (err?.message || String(err)), "error");
@@ -1005,16 +156,113 @@
   }
 
   /**
+   * ドラフトをホームフォームに反映
+   */
+  function applyDraftToHomeForm_(draft) {
+    if (!draft) return;
+
+    const dateEl = $("inputDate");
+    const amtEl = $("inputAmount");
+    const merEl = $("inputMerchant");
+    const memoEl = $("inputMemo");
+    const catEl = $("inputCategory");
+    const payEl = $("inputPayment");
+
+    if (dateEl && draft.date) dateEl.value = draft.date;
+    if (amtEl && draft.amount) amtEl.value = draft.amount;
+    if (merEl && draft.merchant) merEl.value = draft.merchant;
+    if (catEl && draft.category) catEl.value = draft.category;
+    if (payEl && draft.payment_method) payEl.value = draft.payment_method;
+
+    // raw_textがあればメモに追加
+    if (memoEl && draft.raw_text) {
+      memoEl.value = memoEl.value ? memoEl.value + "\n" + draft.raw_text : draft.raw_text;
+    }
+  }
+
+  /**
+   * ホームフォームから保存
+   */
+  function saveFromHome() {
+    const amount = Number($("inputAmount")?.value);
+    if (!amount || amount <= 0) {
+      setHomeStatus("金額を入力してください");
+      return;
+    }
+
+    const draft = {
+      date: $("inputDate")?.value || getTodayISO_(),
+      amount: amount,
+      merchant: $("inputMerchant")?.value || "",
+      category: $("inputCategory")?.value || "",
+      subcategory: "",
+      payment_method: $("inputPayment")?.value || "",
+      memo: $("inputMemo")?.value || "",
+      raw_text: "",
+      confidence: 0
+    };
+
+    const btn = $("btnSaveHome");
+    if (btn) btn.disabled = true;
+    setHomeStatus("保存中...");
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (btn) btn.disabled = false;
+
+        if (!res || !res.ok) {
+          setHomeStatus("保存失敗: " + (res?.error?.user_message || "エラー"));
+          return;
+        }
+
+        const t = res.result.transaction;
+        setHomeStatus(`保存しました！ (ID: ${t.id})`);
+
+        setTimeout(() => {
+          clearHomeForm();
+          setHomeStatus("レシート撮影または音声入力で自動入力できます");
+        }, 2000);
+      })
+      .withFailureHandler((e) => {
+        if (btn) btn.disabled = false;
+        setHomeStatus("エラー: " + (e?.message || String(e)));
+      })
+      .saveTransactionDraft(draft, clientContext_());
+  }
+
+  /**
+   * ホームフォームをクリア
+   */
+  function clearHomeForm() {
+    if ($("inputDate")) $("inputDate").value = getTodayISO_();
+    if ($("inputAmount")) $("inputAmount").value = "";
+    if ($("inputMerchant")) $("inputMerchant").value = "";
+    if ($("inputCategory")) $("inputCategory").value = "";
+    if ($("inputPayment")) $("inputPayment").value = "";
+    if ($("inputMemo")) $("inputMemo").value = "";
+    if ($("receiptCam")) $("receiptCam").value = "";
+    if ($("receiptPick")) $("receiptPick").value = "";
+    setOcrStatus("", "");
+    clearVoice_();
+  }
+
+  /* ========== 音声入力 ========== */
+
+  let recognition = null;
+  let listening = false;
+
+  /**
    * 音声入力のセットアップ
    */
   function setupVoiceInput_() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const btn = $("btnMic");
 
-    if (!SR) {
-      // 非対応ブラウザ
-      btn.disabled = true;
-      btn.innerHTML = '<span class="assistBtn-icon">🎤</span> 音声入力（非対応）';
+    if (!SR || !btn) {
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="assistBtn-icon">🎤</span> 音声入力（非対応）';
+      }
       return;
     }
 
@@ -1065,46 +313,613 @@
   }
 
   /**
+   * 音声テキストから金額/店名を抽出
+   */
+  function parseSpeechToDraft_(text) {
+    const t = (text || "").trim();
+    if (!t) return {};
+
+    // 金額: "620円" "620 えん" "1,500円" など
+    const m = t.match(/([\d,]+)\s*(円|えん)/);
+    const amount = m ? Number(m[1].replace(/,/g, "")) : 0;
+
+    // 店名: 金額の前の部分をざっくり店名/内容扱い
+    let merchant = "";
+    if (m) {
+      merchant = t.slice(0, m.index).trim();
+    } else {
+      merchant = t;
+    }
+
+    return { merchant, amount };
+  }
+
+  /**
    * 音声認識結果をフォームに反映
    */
   function applyVoiceToForm_() {
-    const t = $("voiceText").value.trim();
+    const t = $("voiceText")?.value?.trim();
     if (!t) return;
 
-    // Phase8: メモ欄に追加
-    const memo = $("formMemo");
-    if (memo) {
-      memo.value = memo.value ? memo.value + " " + t : t;
+    // 金額/店名を抽出してフォームに反映
+    const d = parseSpeechToDraft_(t);
+
+    if (d.merchant && $("inputMerchant")) {
+      $("inputMerchant").value = d.merchant;
+    }
+    if (d.amount && $("inputAmount")) {
+      $("inputAmount").value = d.amount;
     }
 
-    setOcrStatus("音声テキストをメモに反映しました", "success");
+    // rawとしてメモにも残す
+    const memoEl = $("inputMemo");
+    if (memoEl) {
+      memoEl.value = memoEl.value ? memoEl.value + " / " + t : t;
+    }
+
+    setOcrStatus("音声からフォームに反映しました", "success");
   }
 
   /**
    * 音声認識結果をクリア
    */
   function clearVoice_() {
-    $("voiceText").value = "";
-    $("voiceBox").style.display = "none";
+    if ($("voiceText")) $("voiceText").value = "";
+    if ($("voiceBox")) $("voiceBox").style.display = "none";
   }
 
-  // DOMContentLoaded に入力タブ初期化を追加
+  /* ========== 入力タブ（手入力専用） ========== */
+
+  /**
+   * フォームステータス表示
+   */
+  function setFormStatus(msg) {
+    const el = $("formStatus");
+    if (el) el.textContent = msg;
+  }
+
+  /**
+   * 入力タブから保存
+   */
+  function saveDraft() {
+    const amount = Number($("formAmount")?.value);
+    if (!amount || amount <= 0) {
+      setFormStatus("金額を入力してください");
+      return;
+    }
+
+    const draft = {
+      date: $("formDate")?.value || getTodayISO_(),
+      amount: amount,
+      merchant: $("formMerchant")?.value || "",
+      category: $("formCategory")?.value || "",
+      subcategory: "",
+      payment_method: $("formPayment")?.value || "",
+      memo: $("formMemo")?.value || "",
+      raw_text: "",
+      confidence: 0
+    };
+
+    const btn = $("btnSaveDraft");
+    if (btn) btn.disabled = true;
+    setFormStatus("保存中...");
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (btn) btn.disabled = false;
+
+        if (!res || !res.ok) {
+          setFormStatus("保存失敗: " + (res?.error?.user_message || "エラー"));
+          return;
+        }
+
+        const t = res.result.transaction;
+        setFormStatus(`保存しました (ID: ${t.id})`);
+
+        setTimeout(() => {
+          clearForm();
+        }, 1500);
+      })
+      .withFailureHandler((e) => {
+        if (btn) btn.disabled = false;
+        setFormStatus("エラー: " + (e?.message || String(e)));
+      })
+      .saveTransactionDraft(draft, clientContext_());
+  }
+
+  /**
+   * 入力タブフォームをクリア
+   */
+  function clearForm() {
+    if ($("formDate")) $("formDate").value = getTodayISO_();
+    if ($("formAmount")) $("formAmount").value = "";
+    if ($("formMerchant")) $("formMerchant").value = "";
+    if ($("formCategory")) $("formCategory").value = "";
+    if ($("formPayment")) $("formPayment").value = "";
+    if ($("formMemo")) $("formMemo").value = "";
+    setFormStatus("入力してください");
+  }
+
+  /* ========== タブ・履歴・編集 ========== */
+
+  let currentMonthStart = getCurrentMonthStart();
+
+  function getCurrentMonthStart() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = ("0" + (now.getMonth() + 1)).slice(-2);
+    return `${y}-${m}-01`;
+  }
+
+  function switchTab(tabName) {
+    document.querySelectorAll(".tab").forEach(t => {
+      t.classList.toggle("active", t.dataset.tab === tabName);
+    });
+
+    document.querySelectorAll(".tab-content").forEach(c => {
+      c.classList.toggle("active", c.id === `tab-${tabName}`);
+    });
+
+    if (tabName === "history") {
+      loadHistory();
+    }
+    if (tabName === "analytics") {
+      loadDashboard();
+    }
+  }
+
+  function changeMonth(delta) {
+    const d = new Date(currentMonthStart);
+    d.setMonth(d.getMonth() + delta);
+    const y = d.getFullYear();
+    const m = ("0" + (d.getMonth() + 1)).slice(-2);
+    currentMonthStart = `${y}-${m}-01`;
+    $("currentMonth").textContent = `${y}-${m}`;
+    loadHistory();
+  }
+
+  function loadHistory() {
+    const statusFilter = $("statusFilter")?.value || "";
+    const filters = {};
+    if (statusFilter) filters.status = statusFilter;
+    filters.includeUndated = true;
+
+    $("historyLoading").style.display = "block";
+    $("historyList").innerHTML = "";
+    $("historyEmpty").style.display = "none";
+    $("undatedSection").style.display = "none";
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        $("historyLoading").style.display = "none";
+
+        if (!res || !res.ok) {
+          $("historyEmpty").style.display = "block";
+          $("historyEmpty").textContent = res?.error?.user_message || "読み込みに失敗しました";
+          return;
+        }
+
+        const { rows, undatedRows } = res.result;
+
+        if (undatedRows && undatedRows.length > 0) {
+          $("undatedSection").style.display = "block";
+          $("undatedList").innerHTML = undatedRows.map(renderHistoryCard).join("");
+        }
+
+        if (rows && rows.length > 0) {
+          $("historyList").innerHTML = rows.map(renderHistoryCard).join("");
+        } else if (!undatedRows || undatedRows.length === 0) {
+          $("historyEmpty").style.display = "block";
+        }
+      })
+      .withFailureHandler((e) => {
+        $("historyLoading").style.display = "none";
+        $("historyEmpty").style.display = "block";
+        $("historyEmpty").textContent = "読み込みエラー: " + (e?.message || String(e));
+      })
+      .listTransactions(currentMonthStart, filters);
+  }
+
+  function renderHistoryCard(txn) {
+    const dateDisplay = txn.date || "日付未確定";
+    const statusLabel = {
+      confirmed: "確定",
+      pending: "未確定",
+      needs_review: "要確認"
+    }[txn.status] || txn.status;
+
+    return `
+      <div class="history-card" onclick='openEditModal(${JSON.stringify(txn).replace(/'/g, "&#39;")})'>
+        <div class="history-card-row1">
+          <span class="history-date">${dateDisplay}</span>
+          <span class="badge badge-${txn.status}">${statusLabel}</span>
+        </div>
+        <div class="history-card-row2">
+          ${txn.merchant || txn.item || "(詳細なし)"}
+        </div>
+        <div class="history-card-row3">
+          ${txn.category}${txn.subcategory ? " / " + txn.subcategory : ""}
+        </div>
+        <div class="history-amount">¥${txn.amount.toLocaleString()}</div>
+      </div>
+    `;
+  }
+
+  function openEditModal(txn) {
+    $("editId").value = txn.id;
+    $("editDate").value = txn.date || "";
+    $("editAmount").value = txn.amount || "";
+    $("editCategory").value = txn.category || "";
+    $("editSubcategory").value = txn.subcategory || "";
+    $("editPaymentMethod").value = txn.payment_method || "";
+    $("editMerchant").value = txn.merchant || "";
+    $("editItem").value = txn.item || "";
+    $("editMemo").value = txn.memo || "";
+    $("editTags").value = txn.tags || "";
+    $("editStatus").value = txn.status || "pending";
+
+    $("editModal").style.display = "flex";
+  }
+
+  function closeEditModal() {
+    $("editModal").style.display = "none";
+  }
+
+  function saveEdit() {
+    const id = $("editId").value;
+    if (!id) return;
+
+    const patch = {
+      date: $("editDate").value,
+      amount: Number($("editAmount").value) || 0,
+      category: $("editCategory").value,
+      subcategory: $("editSubcategory").value,
+      payment_method: $("editPaymentMethod").value,
+      merchant: $("editMerchant").value,
+      item: $("editItem").value,
+      memo: $("editMemo").value,
+      tags: $("editTags").value,
+      status: $("editStatus").value
+    };
+
+    $("btnSaveEdit").disabled = true;
+    $("btnSaveEdit").textContent = "保存中...";
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        $("btnSaveEdit").disabled = false;
+        $("btnSaveEdit").textContent = "保存";
+
+        if (res && res.ok) {
+          closeEditModal();
+          loadHistory();
+        } else {
+          alert(res?.error?.user_message || "保存に失敗しました");
+        }
+      })
+      .withFailureHandler((e) => {
+        $("btnSaveEdit").disabled = false;
+        $("btnSaveEdit").textContent = "保存";
+        alert("エラー: " + (e?.message || String(e)));
+      })
+      .updateTransaction(id, patch);
+  }
+
+  /* ========== ダッシュボード ========== */
+
+  let analyticsMonthStart = getCurrentMonthStart();
+  let categoryChartInstance = null;
+  let trendChartInstance = null;
+
+  const CATEGORY_COLORS = [
+    "#6366F1", "#EC4899", "#F59E0B", "#10B981", "#3B82F6",
+    "#8B5CF6", "#EF4444", "#14B8A6", "#F97316", "#84CC16"
+  ];
+
+  function changeAnalyticsMonth(delta) {
+    const d = new Date(analyticsMonthStart);
+    d.setMonth(d.getMonth() + delta);
+    const y = d.getFullYear();
+    const m = ("0" + (d.getMonth() + 1)).slice(-2);
+    analyticsMonthStart = `${y}-${m}-01`;
+    $("analyticsMonth").textContent = `${y}-${m}`;
+    loadDashboard();
+  }
+
+  function loadDashboard() {
+    $("kpiLoading").style.display = "block";
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        $("kpiLoading").style.display = "none";
+
+        if (!res || !res.ok) {
+          console.error("Dashboard load failed:", res?.error);
+          return;
+        }
+
+        const { kpi, byCategory, trend12m, currency } = res.result;
+
+        renderKpi(kpi, currency);
+        renderCategoryChart(byCategory, currency);
+        renderTrendChart(trend12m, currency);
+        loadInsights();
+      })
+      .withFailureHandler((e) => {
+        $("kpiLoading").style.display = "none";
+        console.error("Dashboard error:", e);
+      })
+      .getDashboard(analyticsMonthStart, {});
+  }
+
+  function renderKpi(kpi, currency) {
+    const fmt = (n) => currency === "JPY" ? "¥" + n.toLocaleString() : currency + " " + n.toLocaleString();
+
+    $("kpiExpense").textContent = fmt(kpi.expense);
+    $("kpiIncome").textContent = fmt(kpi.income);
+
+    const netEl = $("kpiNet");
+    netEl.textContent = fmt(kpi.net);
+    netEl.className = "kpi-value " + (kpi.net >= 0 ? "kpi-positive" : "kpi-negative");
+  }
+
+  function renderCategoryChart(byCategory, currency) {
+    const ctx = $("categoryChart").getContext("2d");
+
+    if (categoryChartInstance) {
+      categoryChartInstance.destroy();
+    }
+
+    if (!byCategory || byCategory.length === 0) {
+      $("categoryLegend").innerHTML = "<span class='empty-message'>データがありません</span>";
+      return;
+    }
+
+    const labels = byCategory.map(c => c.category);
+    const data = byCategory.map(c => c.amount);
+    const colors = byCategory.map((_, i) => CATEGORY_COLORS[i % CATEGORY_COLORS.length]);
+
+    categoryChartInstance = new Chart(ctx, {
+      type: "doughnut",
+      data: {
+        labels: labels,
+        datasets: [{ data: data, backgroundColor: colors, borderWidth: 0 }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } }
+      }
+    });
+
+    const total = data.reduce((a, b) => a + b, 0);
+    const legendHtml = byCategory.map((c, i) => {
+      const pct = total > 0 ? Math.round((c.amount / total) * 100) : 0;
+      const color = CATEGORY_COLORS[i % CATEGORY_COLORS.length];
+      return `
+        <div class="legend-item">
+          <span class="legend-color" style="background:${color}"></span>
+          <span class="legend-label">${c.category}</span>
+          <span class="legend-value">${pct}%</span>
+        </div>
+      `;
+    }).join("");
+    $("categoryLegend").innerHTML = legendHtml;
+  }
+
+  function renderTrendChart(trend12m, currency) {
+    const ctx = $("trendChart").getContext("2d");
+
+    if (trendChartInstance) {
+      trendChartInstance.destroy();
+    }
+
+    if (!trend12m || trend12m.length === 0) {
+      return;
+    }
+
+    const labels = trend12m.map(t => {
+      const parts = t.month.split("-");
+      return `${parts[1]}月`;
+    });
+    const data = trend12m.map(t => t.expense);
+
+    trendChartInstance = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: "支出",
+          data: data,
+          borderColor: "#6366F1",
+          backgroundColor: "rgba(99, 102, 241, 0.1)",
+          fill: true,
+          tension: 0.3,
+          pointRadius: 3,
+          pointBackgroundColor: "#6366F1"
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              callback: function(value) {
+                return currency === "JPY" ? "¥" + value.toLocaleString() : value.toLocaleString();
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  /* ========== インサイト ========== */
+
+  function loadInsights() {
+    $("insightsLoading").style.display = "block";
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        $("insightsLoading").style.display = "none";
+
+        if (!res || !res.ok) {
+          console.error("Insights load failed:", res?.error);
+          return;
+        }
+
+        const { summary, overspendTop3, savingsTop3, fixedCost, meta } = res.result;
+        const currency = meta?.currency || "JPY";
+
+        renderMoM(summary, currency);
+        renderOverspend(overspendTop3, currency);
+        renderSavings(savingsTop3, currency);
+        renderFixedCost(fixedCost, currency);
+      })
+      .withFailureHandler((e) => {
+        $("insightsLoading").style.display = "none";
+        console.error("Insights error:", e);
+      })
+      .getInsights(analyticsMonthStart, {});
+  }
+
+  function renderMoM(summary, currency) {
+    const fmt = (n) => currency === "JPY" ? "¥" + Math.abs(n).toLocaleString() : currency + " " + Math.abs(n).toLocaleString();
+
+    const deltaEl = $("momDelta");
+    const delta = summary.delta;
+    const sign = delta >= 0 ? "+" : "-";
+    deltaEl.textContent = sign + fmt(delta);
+    deltaEl.className = "mom-delta " + (delta >= 0 ? "positive" : "negative");
+
+    const pctEl = $("momPct");
+    if (summary.delta_pct !== null) {
+      const pctSign = summary.delta_pct >= 0 ? "+" : "";
+      pctEl.textContent = `（${pctSign}${summary.delta_pct}%）`;
+    } else {
+      pctEl.textContent = "";
+    }
+
+    $("momThis").textContent = fmt(summary.expense);
+    $("momPrev").textContent = fmt(summary.prev_expense);
+  }
+
+  function renderOverspend(list, currency) {
+    const container = $("overspendList");
+    const empty = $("overspendEmpty");
+
+    if (!list || list.length === 0) {
+      container.innerHTML = "";
+      empty.style.display = "block";
+      return;
+    }
+
+    empty.style.display = "none";
+    container.innerHTML = list.map(item => {
+      const amt = currency === "JPY" ? "¥" + item.delta.toLocaleString() : currency + " " + item.delta.toLocaleString();
+      const pct = item.delta_pct !== null ? `(+${item.delta_pct}%)` : "";
+      return `
+        <div class="insight-item">
+          <span class="insight-cat">${item.category}</span>
+          <span>
+            <span class="insight-delta overspend">+${amt}</span>
+            <span class="insight-pct">${pct}</span>
+          </span>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function renderSavings(list, currency) {
+    const container = $("savingsList");
+    const empty = $("savingsEmpty");
+
+    if (!list || list.length === 0) {
+      container.innerHTML = "";
+      empty.style.display = "block";
+      return;
+    }
+
+    empty.style.display = "none";
+    container.innerHTML = list.map(item => {
+      const amt = currency === "JPY" ? "¥" + Math.abs(item.delta).toLocaleString() : currency + " " + Math.abs(item.delta).toLocaleString();
+      const pct = item.delta_pct !== null ? `(${item.delta_pct}%)` : "";
+      return `
+        <div class="insight-item">
+          <span class="insight-cat">${item.category}</span>
+          <span>
+            <span class="insight-delta savings">-${amt}</span>
+            <span class="insight-pct">${pct}</span>
+          </span>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function renderFixedCost(fixedCost, currency) {
+    const fmt = (n) => currency === "JPY" ? "¥" + n.toLocaleString() : currency + " " + n.toLocaleString();
+
+    $("fixedRatio").textContent = fixedCost.this_ratio_pct + "%";
+    $("fixedTotal").textContent = fmt(fixedCost.this_total);
+
+    const breakdown = fixedCost.breakdown || [];
+    if (breakdown.length === 0) {
+      $("fixedBreakdown").innerHTML = "<span class='empty-message'>固定費データなし</span>";
+      return;
+    }
+
+    $("fixedBreakdown").innerHTML = breakdown.map(item => `
+      <div class="fixed-item">
+        <span class="fixed-item-cat">${item.category}</span>
+        <span class="fixed-item-amt">${fmt(item.amount)}</span>
+      </div>
+    `).join("");
+  }
+
+  /* ========== 初期化 ========== */
+
   document.addEventListener("DOMContentLoaded", () => {
     const d = new Date(currentMonthStart);
-    $("currentMonth").textContent = `${d.getFullYear()}-${("0" + (d.getMonth() + 1)).slice(-2)}`;
-    // 分析タブの月も初期化
-    $("analyticsMonth").textContent = `${d.getFullYear()}-${("0" + (d.getMonth() + 1)).slice(-2)}`;
+    const ym = `${d.getFullYear()}-${("0" + (d.getMonth() + 1)).slice(-2)}`;
+    if ($("currentMonth")) $("currentMonth").textContent = ym;
+    if ($("analyticsMonth")) $("analyticsMonth").textContent = ym;
 
-    // Phase 7: 入力タブを初期化
-    initInputTab();
+    // ホームフォーム日付初期化
+    if ($("inputDate")) $("inputDate").value = getTodayISO_();
+    if ($("formDate")) $("formDate").value = getTodayISO_();
 
-    // Phase 8: カメラ/写真イベント
+    // カメラ/写真イベント
     const cam = $("receiptCam");
     const pick = $("receiptPick");
     if (cam) cam.addEventListener("change", () => handleReceiptFile_(cam.files[0], "camera"));
     if (pick) pick.addEventListener("change", () => handleReceiptFile_(pick.files[0], "picker"));
 
-    // Phase 8: 音声入力セットアップ
+    // 音声入力セットアップ
     setupVoiceInput_();
+
+    // マスタデータ読み込み（カテゴリ/支払方法）
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (!res || !res.ok) {
+          console.error("Failed to load UI master data:", res?.error);
+          return;
+        }
+        MASTER = res.result;
+
+        // ホームタブのselect
+        fillSelect_($("inputCategory"), MASTER.categories, "カテゴリを選択");
+        fillSelect_($("inputPayment"), MASTER.paymentMethods, "支払方法を選択");
+
+        // 入力タブのselect
+        fillSelect_($("formCategory"), MASTER.categories, "カテゴリを選択");
+        fillSelect_($("formPayment"), MASTER.paymentMethods, "支払方法を選択");
+      })
+      .withFailureHandler((e) => {
+        console.error("Failed to load UI master data:", e);
+      })
+      .getUiMasterData();
   });
 </script>

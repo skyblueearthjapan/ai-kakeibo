@@ -811,3 +811,81 @@ function getAccounts() {
     return makeErrResult_(err, traceId, started);
   }
 }
+
+/**
+ * UIマスタデータを取得（01_Settingsシートから）
+ * Phase8: カテゴリ・支払方法をシートから読み込む
+ * @return {Object} { ok, result: { categories, paymentMethods, subcategoriesByCategory } }
+ */
+function getUiMasterData() {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // 01_Settings シートから読み込み
+    const settingsSheet = ss.getSheetByName("01_Settings");
+    let categories = [];
+    let paymentMethods = [];
+
+    if (settingsSheet) {
+      const lastRow = settingsSheet.getLastRow();
+
+      // カテゴリ: A9:A（A列の9行目以降）
+      if (lastRow >= 9) {
+        const catValues = settingsSheet.getRange(9, 1, lastRow - 8, 1).getValues();
+        categories = catValues.flat().filter(v => v && String(v).trim()).map(String);
+      }
+
+      // 支払方法: C9:C（C列の9行目以降）
+      if (lastRow >= 9) {
+        const payValues = settingsSheet.getRange(9, 3, lastRow - 8, 1).getValues();
+        paymentMethods = payValues.flat().filter(v => v && String(v).trim()).map(String);
+      }
+    }
+
+    // デフォルト値（シートが空の場合）
+    if (categories.length === 0) {
+      categories = ["食費", "日用品", "住居", "光熱費", "通信", "交通", "医療", "教育", "娯楽", "交際", "その他"];
+    }
+
+    if (paymentMethods.length === 0) {
+      paymentMethods = ["現金", "クレジットカード", "デビット", "QR/電子マネー", "口座振替", "振込", "ポイント"];
+    }
+
+    // 02_Categories からサブカテゴリマップを構築（あれば）
+    const subcategoriesByCategory = {};
+    const catSheet = ss.getSheetByName("02_Categories");
+    if (catSheet) {
+      const catLastRow = catSheet.getLastRow();
+      if (catLastRow >= 2) {
+        const rows = catSheet.getRange(2, 1, catLastRow - 1, 2).getValues();
+        rows.forEach(r => {
+          const cat = r[0] ? String(r[0]).trim() : "";
+          const sub = r[1] ? String(r[1]).trim() : "";
+          if (!cat || !sub) return;
+          if (!subcategoriesByCategory[cat]) subcategoriesByCategory[cat] = [];
+          if (!subcategoriesByCategory[cat].includes(sub)) {
+            subcategoriesByCategory[cat].push(sub);
+          }
+        });
+      }
+    }
+
+    logSuccess_(traceId, "getUiMasterData", Date.now() - started, {});
+
+    return {
+      ok: true,
+      result: {
+        categories,
+        paymentMethods,
+        subcategoriesByCategory
+      }
+    };
+
+  } catch (err) {
+    logError_(traceId, "getUiMasterData", Date.now() - started, normalizeError_(err, traceId).code, String(err), {});
+    return makeErrResult_(err, traceId, started);
+  }
+}
