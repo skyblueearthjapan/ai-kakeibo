@@ -305,6 +305,36 @@
     opacity: 0.8;
   }
 
+  /* 検索フィルター */
+  .filter-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+
+  .filter-row select {
+    flex: 1;
+    min-width: 80px;
+    font-size: 13px;
+    padding: 6px 8px;
+  }
+
+  .filter-input {
+    flex: 1;
+    min-width: 120px;
+    padding: 8px 12px;
+    border: 1px solid rgba(17, 24, 39, 0.10);
+    border-radius: 8px;
+    font-size: 14px;
+    background: #fff;
+  }
+
+  .filter-input:focus {
+    outline: none;
+    border-color: #6366F1;
+  }
+
   select {
     padding: 8px 12px;
     border: 1px solid rgba(17, 24, 39, 0.10);
@@ -359,6 +389,38 @@
     font-weight: 700;
     font-size: 16px;
     text-align: right;
+  }
+
+  /* 履歴カードのアクションボタン */
+  .history-card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    justify-content: flex-end;
+  }
+
+  .history-card-actions button {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-edit {
+    background: var(--blue);
+    color: #1E40AF;
+  }
+
+  .btn-delete {
+    background: var(--pink);
+    color: #BE185D;
+  }
+
+  .btn-edit:active,
+  .btn-delete:active {
+    opacity: 0.7;
   }
 
   /* ステータスバッジ */

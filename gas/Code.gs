@@ -444,6 +444,52 @@ function updateTransaction(id, patch) {
   }
 }
 
+/**
+ * UI -> GAS: 取引を削除
+ * @param {string} id 取引ID
+ * @return {Object} { ok, result: { deleted_id } }
+ */
+function deleteTransaction(id) {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    if (!id) {
+      throw makeAppError_("E_BAD_REQUEST", "ID is required", traceId, false, "IDが指定されていません。");
+    }
+
+    const result = withSheetLock_(() => {
+      const sheet = getSheetByName_("04_Transactions");
+      const values = sheet.getDataRange().getValues();
+      const idxMap = buildTransactionsHeaderIndex_(values[0]);
+
+      // 行を検索
+      const rowNumber = findRowById_(id, values, idxMap);
+      if (!rowNumber) {
+        throw makeAppError_("E_NOT_FOUND", `Transaction not found: ${id}`, traceId, false, "該当する取引が見つかりません。");
+      }
+
+      // 行を削除
+      sheet.deleteRow(rowNumber);
+
+      return {
+        ok: true,
+        result: {
+          deleted_id: id,
+          meta: { duration_ms: Date.now() - started }
+        }
+      };
+    });
+
+    logSuccess_(traceId, "deleteTransaction", Date.now() - started, { txn_id: id });
+    return result;
+
+  } catch (err) {
+    logError_(traceId, "deleteTransaction", Date.now() - started, normalizeError_(err, traceId).code, String(err), {});
+    return makeErrResult_(err, traceId, started);
+  }
+}
+
 /** ========== Phase 4: ダッシュボード ========== */
 
 /**

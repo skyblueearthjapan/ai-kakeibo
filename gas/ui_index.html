@@ -144,20 +144,26 @@
           <span id="currentMonth">2026-01</span>
           <button class="btn-small" onclick="changeMonth(1)">&gt;</button>
         </div>
+        <button class="btn-small" onclick="loadHistory()">更新</button>
+      </div>
+      <!-- 検索フィルター -->
+      <div class="filter-row">
         <select id="statusFilter" onchange="loadHistory()">
-          <option value="">すべて</option>
+          <option value="">ステータス</option>
           <option value="pending">未確定</option>
           <option value="needs_review">要確認</option>
           <option value="confirmed">確定済み</option>
         </select>
-        <button class="btn-small" onclick="loadHistory()">更新</button>
+        <select id="categoryFilter" onchange="loadHistory()">
+          <option value="">カテゴリ</option>
+        </select>
+        <select id="paymentFilter" onchange="loadHistory()">
+          <option value="">支払方法</option>
+        </select>
       </div>
-    </section>
-
-    <!-- 未確定（date空）セクション -->
-    <section id="undatedSection" class="card pastel-pink" style="display:none;">
-      <h3>日付未確定</h3>
-      <div id="undatedList" class="history-list"></div>
+      <div class="filter-row">
+        <input type="text" id="queryFilter" class="filter-input" placeholder="店名・品目で検索" onkeyup="debounceSearch()">
+      </div>
     </section>
 
     <!-- 履歴一覧 -->

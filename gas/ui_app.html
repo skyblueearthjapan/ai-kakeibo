@@ -757,14 +757,20 @@
 
   function loadHistory() {
     const statusFilter = $("statusFilter")?.value || "";
+    const categoryFilter = $("categoryFilter")?.value || "";
+    const paymentFilter = $("paymentFilter")?.value || "";
+    const queryFilter = $("queryFilter")?.value?.trim() || "";
+
     const filters = {};
     if (statusFilter) filters.status = statusFilter;
-    filters.includeUndated = true;
+    if (categoryFilter) filters.category = categoryFilter;
+    if (paymentFilter) filters.payment_method = paymentFilter;
+    if (queryFilter) filters.query = queryFilter;
+    filters.includeUndated = false;  // 日付未設定は非表示
 
     $("historyLoading").style.display = "block";
     $("historyList").innerHTML = "";
     $("historyEmpty").style.display = "none";
-    $("undatedSection").style.display = "none";
 
     google.script.run
       .withSuccessHandler((res) => {
@@ -776,17 +782,29 @@
           return;
         }
 
-        const { rows, undatedRows } = res.result;
-
-        if (undatedRows && undatedRows.length > 0) {
-          $("undatedSection").style.display = "block";
-          $("undatedList").innerHTML = undatedRows.map(renderHistoryCard).join("");
-        }
+        const { rows } = res.result;
 
         if (rows && rows.length > 0) {
-          $("historyList").innerHTML = rows.map(renderHistoryCard).join("");
-        } else if (!undatedRows || undatedRows.length === 0) {
+          // クライアント側でもフィルタリング（query検索）
+          let filtered = rows;
+          if (queryFilter) {
+            const q = queryFilter.toLowerCase();
+            filtered = rows.filter(txn =>
+              (txn.merchant || "").toLowerCase().includes(q) ||
+              (txn.item || "").toLowerCase().includes(q) ||
+              (txn.memo || "").toLowerCase().includes(q)
+            );
+          }
+
+          if (filtered.length > 0) {
+            $("historyList").innerHTML = filtered.map(renderHistoryCard).join("");
+          } else {
+            $("historyEmpty").style.display = "block";
+            $("historyEmpty").textContent = "該当する取引がありません";
+          }
+        } else {
           $("historyEmpty").style.display = "block";
+          $("historyEmpty").textContent = "該当する取引がありません";
         }
       })
       .withFailureHandler((e) => {
@@ -797,6 +815,15 @@
       .listTransactions(currentMonthStart, filters);
   }
 
+  let searchTimeout = null;
+
+  function debounceSearch() {
+    if (searchTimeout) clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+      loadHistory();
+    }, 300);
+  }
+
   function renderHistoryCard(txn) {
     const dateDisplay = txn.date || "日付未確定";
     const statusLabel = {
@@ -805,21 +832,47 @@
       needs_review: "要確認"
     }[txn.status] || txn.status;
 
+    const txnJson = JSON.stringify(txn).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
+
     return `
-      <div class="history-card" onclick='openEditModal(${JSON.stringify(txn).replace(/'/g, "&#39;")})'>
+      <div class="history-card">
         <div class="history-card-row1">
-          <span class="history-date">${dateDisplay}</span>
+          <span class="history-date">${escapeHtml_(dateDisplay)}</span>
           <span class="badge badge-${txn.status}">${statusLabel}</span>
         </div>
         <div class="history-card-row2">
-          ${txn.merchant || txn.item || "(詳細なし)"}
+          ${escapeHtml_(txn.merchant || txn.item || "(詳細なし)")}
         </div>
         <div class="history-card-row3">
-          ${txn.category}${txn.subcategory ? " / " + txn.subcategory : ""}
+          ${escapeHtml_(txn.category)}${txn.subcategory ? " / " + escapeHtml_(txn.subcategory) : ""}
         </div>
         <div class="history-amount">¥${txn.amount.toLocaleString()}</div>
+        <div class="history-card-actions">
+          <button class="btn-edit" onclick='openEditModal(${txnJson})'>編集</button>
+          <button class="btn-delete" onclick='confirmDelete("${txn.id}")'>削除</button>
+        </div>
       </div>
     `;
+  }
+
+  function confirmDelete(id) {
+    if (!confirm("この取引を削除しますか？")) return;
+    deleteTransaction(id);
+  }
+
+  function deleteTransaction(id) {
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (res && res.ok) {
+          loadHistory();
+        } else {
+          alert(res?.error?.user_message || "削除に失敗しました");
+        }
+      })
+      .withFailureHandler((e) => {
+        alert("エラー: " + (e?.message || String(e)));
+      })
+      .deleteTransaction(id);
   }
 
   function openEditModal(txn) {
@@ -1185,6 +1238,10 @@
         // ホームタブのselect
         fillSelect_($("inputCategory"), MASTER.categories, "カテゴリを選択");
         fillSelect_($("inputPayment"), MASTER.paymentMethods, "支払方法を選択");
+
+        // 履歴タブのフィルターselect
+        fillSelect_($("categoryFilter"), MASTER.categories, "カテゴリ");
+        fillSelect_($("paymentFilter"), MASTER.paymentMethods, "支払方法");
       })
       .withFailureHandler((e) => {
         console.error("Failed to load UI master data:", e);
