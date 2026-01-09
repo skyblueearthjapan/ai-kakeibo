@@ -4,18 +4,16 @@
  * - getActiveSpreadsheet() はWebアプリ実行時に失敗するため禁止
  */
 
-// ★ 直接設定: ここにスプレッドシートIDを記載（最も確実）
-const HARDCODED_SPREADSHEET_ID_ = "1a2rTbAwIBYfH0CstleN15VvUwk4AyisJJ3QFyok8uWY";
-
 /**
  * スプレッドシートIDを取得
- * 優先順位: ハードコード > Script Properties > フォールバック
+ * コンテナバインド優先（WebAppでも動作）
  */
 function getSpreadsheetId_() {
-  // 1) ハードコードされたID（最優先・最も確実）
-  if (HARDCODED_SPREADSHEET_ID_ && HARDCODED_SPREADSHEET_ID_.length > 10) {
-    return HARDCODED_SPREADSHEET_ID_;
-  }
+  // 1) コンテナバインド（最優先）
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (ss) return ss.getId();
+  } catch (_) {}
 
   // 2) Script Properties
   try {
@@ -24,21 +22,27 @@ function getSpreadsheetId_() {
     if (id1) return id1.trim();
   } catch (_) {}
 
-  // 3) フォールバック：コンテナバインドならOK（standaloneだと失敗し得る）
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    if (ss) return ss.getId();
-  } catch (_) {}
-
-  throw new Error("SPREADSHEET_ID is missing.");
+  throw new Error("SPREADSHEET_ID is missing. This script must be container-bound or have SPREADSHEET_ID in Script Properties.");
 }
 
 /**
- * スプレッドシートを取得（openById使用・WebApp安全）
+ * スプレッドシートを取得（コンテナバインド優先）
  */
 function getSs_() {
-  const id = getSpreadsheetId_();
-  return SpreadsheetApp.openById(id);
+  // コンテナバインドなら直接取得（最も確実）
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (ss) return ss;
+  } catch (_) {}
+
+  // フォールバック: Script PropertiesのIDで開く
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const id = props.getProperty("SPREADSHEET_ID");
+    if (id) return SpreadsheetApp.openById(id.trim());
+  } catch (_) {}
+
+  throw new Error("Cannot access spreadsheet. Ensure this script is container-bound.");
 }
 
 /**
