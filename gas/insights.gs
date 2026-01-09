@@ -208,6 +208,16 @@ function getActiveFixedCostsForInsights_() {
   const idxCategory = headers.indexOf("category");
   const idxActive = headers.indexOf("active");
 
+  // 必須列チェック
+  if (idxAmount < 0) {
+    console.log("[FIXED] ERROR: amount列が見つかりません");
+    return [];
+  }
+  if (idxActive < 0) {
+    console.log("[FIXED] ERROR: active列が見つかりません");
+    return [];
+  }
+
   const results = [];
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
@@ -223,21 +233,32 @@ function getActiveFixedCostsForInsights_() {
 
     if (isActive) {
       var name = String(row[idxName] || "").trim();
-      var amount = Number(row[idxAmount]) || 0;
 
-      console.log("[FIXED] 行" + (i+1) + ": " + name + " ¥" + amount + " active=" + activeRaw);
+      // amount: 数値 or カンマ入り文字列 "80,000" 両対応
+      var amtRaw = row[idxAmount];
+      var amt = 0;
+      if (typeof amtRaw === "number") {
+        amt = amtRaw;
+      } else {
+        // 文字列の場合：カンマ除去して数値化
+        amt = Number(String(amtRaw).replace(/,/g, "").trim());
+      }
+      if (!isFinite(amt)) amt = 0;
 
-      if (name && amount > 0) {
+      console.log("[FIXED] 行" + (i+1) + ": " + name + " ¥" + amt + " (raw=" + amtRaw + ", type=" + typeof amtRaw + ") active=" + activeRaw);
+
+      if (name && amt > 0) {
         results.push({
           name: name,
-          amount: amount,
+          amount: amt,
           category: String(row[idxCategory] || "").trim()
         });
       }
     }
   }
 
-  console.log("[FIXED] 有効な固定費: " + results.length + "件, 合計: ¥" + results.reduce(function(s,r){return s+r.amount;},0));
+  var total = results.reduce(function(s,r){return s+r.amount;},0);
+  console.log("[FIXED] 有効な固定費: " + results.length + "件, 合計: ¥" + total);
   return results;
 }
 

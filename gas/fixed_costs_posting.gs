@@ -206,7 +206,16 @@ function listActiveFixedCosts_(traceId) {
     if (isActive) {
       var id = String(row[idxId] || "").trim();
       var name = String(row[idxName] || "").trim();
-      var amount = Number(row[idxAmount]) || 0;
+
+      // amount: 数値 or カンマ入り文字列 "80,000" 両対応
+      var amtRaw = row[idxAmount];
+      var amount = 0;
+      if (typeof amtRaw === "number") {
+        amount = amtRaw;
+      } else {
+        amount = Number(String(amtRaw).replace(/,/g, "").trim());
+      }
+      if (!isFinite(amount)) amount = 0;
 
       if (!id || !name || amount <= 0) {
         Logger.log("[" + traceId + "] スキップ（無効データ）: id=" + id + ", name=" + name + ", amount=" + amount);
