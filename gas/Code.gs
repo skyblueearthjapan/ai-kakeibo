@@ -506,8 +506,8 @@ function getDashboard(monthStart, opts) {
     const ms = normalizeMonthStart_(monthStart);
     const o = opts || {};
 
-    // 方針A: 固定費は07_FixedCostsマスターから直接読む（取引行を作らない）
-    // ensureFixedCostsPostedForMonth_(ms) は使用しない
+    // 方針B: 固定費を取引として実体化（Upsert方式で同期）
+    ensureFixedCostsPostedForMonth_(ms);
 
     const txns = getAllTransactionsAsObjects_(traceId);
     const dashboard = buildDashboard_(txns, ms, { includeUnconfirmed: !!o.includeUnconfirmed });
@@ -564,8 +564,8 @@ function getInsights(monthStart, opts) {
   try {
     const ms = normalizeMonthStart_(monthStart);
 
-    // 方針A: 固定費は07_FixedCostsマスターから直接読む（取引行を作らない）
-    // ensureFixedCostsPostedForMonth_(ms) は使用しない
+    // 方針B: 固定費を取引として実体化（Upsert方式で同期）
+    ensureFixedCostsPostedForMonth_(ms);
 
     const txns = getAllTransactionsAsObjects_(traceId);
 
@@ -1243,6 +1243,29 @@ function saveFixedCost(data) {
       sheet.appendRow(newRow);
     }
 
+    // 方針B: 当月の固定費取引も同期（Upsert）
+    // active=TRUE の場合のみ、当月の取引を作成/更新
+    if (data.active !== false) {
+      const now2 = new Date();
+      const currentYm = now2.getFullYear() + "-" + String(now2.getMonth() + 1).padStart(2, "0");
+
+      const fcForSync = {
+        id: targetId,
+        name: data.name,
+        amount: Number(String(data.amount || 0).replace(/,/g, "")) || 0,
+        category: data.category || "",
+        payment: data.payment || ""
+      };
+
+      try {
+        const syncResult = upsertFixedCostTransaction_(fcForSync, currentYm, traceId);
+        Logger.log("[" + traceId + "] 固定費取引同期: " + syncResult.action);
+      } catch (syncErr) {
+        Logger.log("[" + traceId + "] 固定費取引同期エラー（継続）: " + syncErr.message);
+        // 同期エラーは警告のみ、保存自体は成功扱い
+      }
+    }
+
     logSuccess_(traceId, "saveFixedCost", Date.now() - started, { fixed_id: targetId });
 
     return {
@@ -1286,6 +1309,17 @@ function deleteFixedCost(id) {
 
     if (!deleted) {
       throw makeAppError_("E_NOT_FOUND", `Fixed cost not found: ${id}`, traceId, false, "該当する固定費が見つかりません。");
+    }
+
+    // 方針B: 当月の固定費取引も削除
+    try {
+      const now = new Date();
+      const currentYm = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+      const txnDeleted = deleteFixedCostTransaction_(id, currentYm, traceId);
+      Logger.log("[" + traceId + "] 固定費取引削除: " + (txnDeleted ? "成功" : "該当なし"));
+    } catch (syncErr) {
+      Logger.log("[" + traceId + "] 固定費取引削除エラー（継続）: " + syncErr.message);
+      // 同期エラーは警告のみ
     }
 
     logSuccess_(traceId, "deleteFixedCost", Date.now() - started, { fixed_id: id });

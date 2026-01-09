@@ -1,7 +1,8 @@
 /**
  * 固定費自動起票モジュール
  * 毎月1日 6:00 に active=TRUE の固定費を 04_Transactions へ自動起票
- * 重複防止: memo フィールドに FIXED:<fixed_id>:YYYY-MM パターンを使用
+ * 方針B: 固定費を取引として実体化し、編集時はupsertで同期
+ * 識別: fixed_cost_id, fixed_month カラム + memo(FIXED:<id>:YYYY-MM)
  */
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -38,6 +39,198 @@ function getPostingDateForMonth_(now) {
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, "0");
   return y + "-" + m + "-01";
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Upsert関数（固定費編集時の同期用）
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 固定費取引をUpsert（既存があれば更新、なければ作成）
+ * @param {Object} fc - 固定費オブジェクト {id, name, amount, category, payment}
+ * @param {string} ym - YYYY-MM形式
+ * @param {string} traceId
+ * @returns {Object} {action: "created"|"updated"|"skipped", txnId: string}
+ */
+function upsertFixedCostTransaction_(fc, ym, traceId) {
+  const sheet = getSs_().getSheetByName("04_Transactions");
+  if (!sheet) {
+    Logger.log("[" + traceId + "] 04_Transactions シートが存在しません");
+    return { action: "skipped", txnId: null };
+  }
+
+  const dedupKey = makeFixedDedupKey_(fc.id, ym);
+  const postingDate = ym + "-01";
+  const timestamp = new Date().toISOString();
+
+  // 既存の固定費取引を検索
+  const existing = findFixedCostTransactionRow_(sheet, fc.id, ym, traceId);
+
+  if (existing) {
+    // 既存行を更新
+    Logger.log("[" + traceId + "] 既存固定費取引を更新: " + fc.name + " row=" + existing.rowNum);
+    updateFixedCostTransactionRow_(sheet, existing, fc, dedupKey, timestamp, traceId);
+    return { action: "updated", txnId: existing.id };
+  } else {
+    // 新規作成
+    Logger.log("[" + traceId + "] 固定費取引を新規作成: " + fc.name);
+    const rowObj = {
+      id: generateTransactionId_(),
+      date: postingDate,
+      type: "expense",
+      amount: fc.amount,
+      merchant: fc.name,
+      item: fc.name,
+      category: fc.category || "",
+      payment_method: fc.payment || "",
+      memo: dedupKey,
+      source: "fixed_cost",
+      fixed_cost_id: fc.id,
+      fixed_month: ym,
+      status: "confirmed",
+      created_at: timestamp,
+      updated_at: timestamp
+    };
+    appendTransactionRow_(rowObj, traceId);
+    return { action: "created", txnId: rowObj.id };
+  }
+}
+
+/**
+ * 固定費取引の既存行を検索
+ * @param {Sheet} sheet - 04_Transactionsシート
+ * @param {string} fixedCostId - 固定費ID
+ * @param {string} ym - YYYY-MM形式
+ * @param {string} traceId
+ * @returns {Object|null} {rowNum, id, colIndexes} or null
+ */
+function findFixedCostTransactionRow_(sheet, fixedCostId, ym, traceId) {
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return null;
+
+  const headers = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
+  const idxId = headers.indexOf("id");
+  const idxMemo = headers.indexOf("memo");
+  const idxFixedCostId = headers.indexOf("fixed_cost_id");
+  const idxFixedMonth = headers.indexOf("fixed_month");
+  const idxAmount = headers.indexOf("amount");
+  const idxMerchant = headers.indexOf("merchant");
+  const idxItem = headers.indexOf("item");
+  const idxCategory = headers.indexOf("category");
+  const idxPaymentMethod = headers.indexOf("payment_method");
+  const idxUpdatedAt = headers.indexOf("updated_at");
+
+  const dedupKey = makeFixedDedupKey_(fixedCostId, ym);
+
+  // 検索: fixed_cost_id + fixed_month カラム、または memo パターン
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var matched = false;
+
+    // 優先1: fixed_cost_id と fixed_month カラムで検索
+    if (idxFixedCostId >= 0 && idxFixedMonth >= 0) {
+      var fcId = String(row[idxFixedCostId] || "").trim();
+      var fcMonth = String(row[idxFixedMonth] || "").trim();
+      if (fcId === fixedCostId && fcMonth === ym) {
+        matched = true;
+      }
+    }
+
+    // 優先2: memo パターンで検索（後方互換）
+    if (!matched && idxMemo >= 0) {
+      var memo = String(row[idxMemo] || "");
+      if (memo === dedupKey) {
+        matched = true;
+      }
+    }
+
+    if (matched) {
+      return {
+        rowNum: i + 1, // 1-indexed
+        id: idxId >= 0 ? String(row[idxId] || "") : "",
+        colIndexes: {
+          amount: idxAmount,
+          merchant: idxMerchant,
+          item: idxItem,
+          category: idxCategory,
+          paymentMethod: idxPaymentMethod,
+          updatedAt: idxUpdatedAt,
+          fixedCostId: idxFixedCostId,
+          fixedMonth: idxFixedMonth,
+          memo: idxMemo
+        }
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 固定費取引行を更新
+ * @param {Sheet} sheet
+ * @param {Object} existing - findFixedCostTransactionRow_の戻り値
+ * @param {Object} fc - 固定費オブジェクト
+ * @param {string} dedupKey
+ * @param {string} timestamp
+ * @param {string} traceId
+ */
+function updateFixedCostTransactionRow_(sheet, existing, fc, dedupKey, timestamp, traceId) {
+  const rowNum = existing.rowNum;
+  const cols = existing.colIndexes;
+
+  // 更新対象のセルを個別に更新（列が存在する場合のみ）
+  if (cols.amount >= 0) {
+    sheet.getRange(rowNum, cols.amount + 1).setValue(fc.amount);
+  }
+  if (cols.merchant >= 0) {
+    sheet.getRange(rowNum, cols.merchant + 1).setValue(fc.name);
+  }
+  if (cols.item >= 0) {
+    sheet.getRange(rowNum, cols.item + 1).setValue(fc.name);
+  }
+  if (cols.category >= 0) {
+    sheet.getRange(rowNum, cols.category + 1).setValue(fc.category || "");
+  }
+  if (cols.paymentMethod >= 0) {
+    sheet.getRange(rowNum, cols.paymentMethod + 1).setValue(fc.payment || "");
+  }
+  if (cols.updatedAt >= 0) {
+    sheet.getRange(rowNum, cols.updatedAt + 1).setValue(timestamp);
+  }
+  // fixed_cost_id, fixed_month, memo も確実にセット（後方互換のため）
+  if (cols.fixedCostId >= 0) {
+    sheet.getRange(rowNum, cols.fixedCostId + 1).setValue(fc.id);
+  }
+  if (cols.fixedMonth >= 0) {
+    const ym = dedupKey.split(":")[2]; // FIXED:xxx:YYYY-MM からYYYY-MM抽出
+    sheet.getRange(rowNum, cols.fixedMonth + 1).setValue(ym);
+  }
+  if (cols.memo >= 0) {
+    sheet.getRange(rowNum, cols.memo + 1).setValue(dedupKey);
+  }
+
+  Logger.log("[" + traceId + "] 更新完了: row=" + rowNum + " amount=" + fc.amount);
+}
+
+/**
+ * 固定費削除時に当月の取引も削除
+ * @param {string} fixedCostId - 削除する固定費ID
+ * @param {string} ym - YYYY-MM形式
+ * @param {string} traceId
+ * @returns {boolean} 削除成功
+ */
+function deleteFixedCostTransaction_(fixedCostId, ym, traceId) {
+  const sheet = getSs_().getSheetByName("04_Transactions");
+  if (!sheet) return false;
+
+  const existing = findFixedCostTransactionRow_(sheet, fixedCostId, ym, traceId);
+  if (existing) {
+    sheet.deleteRow(existing.rowNum);
+    Logger.log("[" + traceId + "] 固定費取引を削除: row=" + existing.rowNum);
+    return true;
+  }
+  return false;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -363,9 +556,10 @@ function runFixedCostPostingForMonth(year, month) {
 
 /**
  * 指定月の固定費が起票済みかを確認し、未起票なら起票する（遅延起票）
+ * 方針B: Upsert方式（既存があれば更新、なければ作成）
  * ダッシュボード/インサイト取得時に呼び出す
  * @param {string} monthStartISO - YYYY-MM-01形式
- * @returns {Object} { posted: number, skipped: number }
+ * @returns {Object} { created: number, updated: number, skipped: number }
  */
 function ensureFixedCostsPostedForMonth_(monthStartISO) {
   const traceId = "FIXED-ENSURE-" + Date.now();
@@ -374,30 +568,21 @@ function ensureFixedCostsPostedForMonth_(monthStartISO) {
   const match = String(monthStartISO).match(/^(\d{4})-(\d{2})/);
   if (!match) {
     Logger.log("[" + traceId + "] 月解析失敗: " + monthStartISO);
-    return { posted: 0, skipped: 0, reason: "invalid_month" };
+    return { created: 0, updated: 0, skipped: 0, reason: "invalid_month" };
   }
 
   const year = parseInt(match[1], 10);
   const month = parseInt(match[2], 10);
   const ym = year + "-" + String(month).padStart(2, "0");
-  const postingDate = ym + "-01";
 
-  Logger.log("[" + traceId + "] 遅延起票開始: ym=" + ym);
+  Logger.log("[" + traceId + "] 固定費同期開始: ym=" + ym);
 
-  // 当月または過去月のみ起票（未来月は起票しない）
+  // 当月または過去月のみ処理（未来月は処理しない）
   const now = new Date();
   const targetDate = new Date(year, month - 1, 1);
   if (targetDate > now) {
     Logger.log("[" + traceId + "] 未来月のためスキップ");
-    return { posted: 0, skipped: 0, reason: "future_month" };
-  }
-
-  // ScriptPropertiesで処理済みチェック（CacheServiceより永続的）
-  const props = PropertiesService.getScriptProperties();
-  const propKey = "FIXED_POSTED_" + ym;
-  if (props.getProperty(propKey) === "1") {
-    Logger.log("[" + traceId + "] 処理済み（ScriptProperties）: " + ym);
-    return { posted: 0, skipped: 0, reason: "already_processed" };
+    return { created: 0, updated: 0, skipped: 0, reason: "future_month" };
   }
 
   // 固定費を取得
@@ -405,63 +590,33 @@ function ensureFixedCostsPostedForMonth_(monthStartISO) {
   Logger.log("[" + traceId + "] アクティブ固定費: " + fixedCosts.length + "件");
 
   if (fixedCosts.length === 0) {
-    props.setProperty(propKey, "1");
-    return { posted: 0, skipped: 0, reason: "no_fixed_costs" };
+    return { created: 0, updated: 0, skipped: 0, reason: "no_fixed_costs" };
   }
 
-  // 起票済みキーを収集（04_Transactionsのmemoから）
-  const postedKeys = collectPostedFixedKeysForMonth_(ym, traceId);
-  Logger.log("[" + traceId + "] 起票済みキー: " + postedKeys.size + "件");
-
-  // 未起票の固定費を起票
-  let postedCount = 0;
+  // 各固定費をUpsert（既存があれば更新、なければ作成）
+  let createdCount = 0;
+  let updatedCount = 0;
   let skippedCount = 0;
 
   fixedCosts.forEach(function(fc) {
-    const dedupKey = makeFixedDedupKey_(fc.id, ym);
-
-    if (postedKeys.has(dedupKey)) {
-      Logger.log("[" + traceId + "] スキップ（起票済み）: " + fc.name);
-      skippedCount++;
-      return;
-    }
-
-    const timestamp = new Date().toISOString();
-
-    // ヘッダー駆動 appendTransactionRow_ 用のオブジェクト形式
-    // 04_Transactions のヘッダーと完全一致させる
-    const rowObj = {
-      id: generateTransactionId_(),
-      date: postingDate,
-      type: "expense",
-      amount: fc.amount,
-      merchant: fc.name,
-      item: fc.name,
-      category: fc.category || "",
-      payment_method: fc.payment || "",
-      memo: dedupKey,
-      source: "fixed_cost",
-      status: "confirmed",
-      created_at: timestamp,
-      updated_at: timestamp
-    };
-
-    Logger.log("[" + traceId + "] 起票: " + fc.name + " ¥" + fc.amount);
-
     try {
-      appendTransactionRow_(rowObj, traceId);
-      postedCount++;
+      const result = upsertFixedCostTransaction_(fc, ym, traceId);
+      if (result.action === "created") {
+        createdCount++;
+      } else if (result.action === "updated") {
+        updatedCount++;
+      } else {
+        skippedCount++;
+      }
     } catch (e) {
-      Logger.log("[" + traceId + "] 起票エラー: " + e.message);
+      Logger.log("[" + traceId + "] Upsertエラー: " + fc.name + " - " + e.message);
+      skippedCount++;
     }
   });
 
-  // 処理済みフラグをセット
-  props.setProperty(propKey, "1");
+  Logger.log("[" + traceId + "] 固定費同期完了: 作成=" + createdCount + "件, 更新=" + updatedCount + "件, スキップ=" + skippedCount + "件");
 
-  Logger.log("[" + traceId + "] 遅延起票完了: 起票=" + postedCount + "件, スキップ=" + skippedCount + "件");
-
-  return { posted: postedCount, skipped: skippedCount };
+  return { created: createdCount, updated: updatedCount, skipped: skippedCount };
 }
 
 /**

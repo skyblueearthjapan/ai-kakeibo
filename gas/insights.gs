@@ -61,7 +61,8 @@ function buildInsights_(txns, monthStartISO, opts) {
     .sort((a, b) => a.delta - b.delta) // more negative first
     .slice(0, 3);
 
-  const fixedCost = computeFixedCost_(thisCat, thisExpense, fixedCategories);
+  // 方針B: 固定費も04_Transactionsに存在するため、取引から計算
+  const fixedCost = computeFixedCost_(thisTxns, fixedCategories);
 
   return {
     monthStart: monthStartISO,
@@ -140,46 +141,56 @@ function buildCategoryDiff_(thisMap, prevMap) {
 
 /**
  * Fixed cost ratio and breakdown.
- * 07_FixedCosts シートから直接読み込んで計算（カテゴリベースではなく）
- * @param {number} txnExpenseTotal - 04_Transactions の支出合計
+ * 方針B: 04_Transactions から固定費と変動費を分けて計算
+ * @param {Object[]} txns - 当月の取引配列
+ * @param {string[]} fixedCategories - 固定費カテゴリ（参考用）
  */
-function computeFixedCost_(thisCatMap, txnExpenseTotal, fixedCategories) {
-  // 07_FixedCosts シートから active=TRUE の固定費を全件取得
-  const fixedCosts = getActiveFixedCostsForInsights_();
+function computeFixedCost_(txns, fixedCategories) {
+  // 支出のみをフィルタ
+  const expenseTxns = txns.filter(function(t) {
+    return t.type === "expense";
+  });
 
-  // デバッグログ
-  console.log("[FIXED] rows=", fixedCosts.length);
+  // 固定費取引を分離（isFixedCostTransaction_で判定）
+  const fixedTxns = expenseTxns.filter(function(t) {
+    return isFixedCostTransaction_(t);
+  });
+  const variableTxns = expenseTxns.filter(function(t) {
+    return !isFixedCostTransaction_(t);
+  });
 
-  // active=TRUE の固定費を全件合算（reduce の初期値 0 必須）
-  const fixedTotal = fixedCosts.reduce(function(sum, r) {
-    return sum + (Number(r.amount) || 0);
+  // 固定費合計
+  const fixedTotal = fixedTxns.reduce(function(sum, t) {
+    return sum + (Number(t.amount) || 0);
   }, 0);
 
-  console.log("[FIXED] fixedTotal=", fixedTotal);
-  console.log("[FIXED] txnExpenseTotal=", txnExpenseTotal);
+  // 変動費合計
+  const variableTotal = variableTxns.reduce(function(sum, t) {
+    return sum + (Number(t.amount) || 0);
+  }, 0);
 
-  // breakdown: 固定費の内訳
-  const breakdown = fixedCosts
-    .filter(function(r) { return (Number(r.amount) || 0) > 0; })
-    .map(function(r) {
+  // 支出合計
+  const expenseTotal = fixedTotal + variableTotal;
+
+  console.log("[FIXED] 固定費取引数:", fixedTxns.length);
+  console.log("[FIXED] fixedTotal:", fixedTotal);
+  console.log("[FIXED] variableTotal:", variableTotal);
+  console.log("[FIXED] expenseTotal:", expenseTotal);
+
+  // breakdown: 固定費の内訳（取引から生成）
+  const breakdown = fixedTxns
+    .filter(function(t) { return (Number(t.amount) || 0) > 0; })
+    .map(function(t) {
       return {
-        category: r.category || "固定費",
-        name: r.name,
-        amount: Math.round(Number(r.amount) || 0)
+        category: t.category || "固定費",
+        name: t.merchant || t.item || "固定費",
+        amount: Math.round(Number(t.amount) || 0)
       };
     })
     .sort(function(a, b) { return b.amount - a.amount; });
 
-  // 変動費 = Transactions の支出合計（固定費は別管理なので含まない）
-  const variableTotal = txnExpenseTotal;
-
-  // 支出合計 = 固定費 + 変動費
-  const expenseTotal = fixedTotal + variableTotal;
-  console.log("[FIXED] variableTotal=", variableTotal);
-  console.log("[FIXED] expenseTotal (fixed+variable)=", expenseTotal);
-
   const ratioPct = expenseTotal > 0 ? round1_((fixedTotal / expenseTotal) * 100) : 0;
-  console.log("[FIXED] ratio%=", ratioPct);
+  console.log("[FIXED] ratio%:", ratioPct);
 
   return {
     categories: fixedCategories,
@@ -196,82 +207,7 @@ function computeFixedCost_(thisCatMap, txnExpenseTotal, fixedCategories) {
   };
 }
 
-/**
- * 07_FixedCosts から active=TRUE の固定費を取得（インサイト用）
- */
-function getActiveFixedCostsForInsights_() {
-  const ss = getSs_();
-  const sheet = ss.getSheetByName("07_FixedCosts");
-  if (!sheet) {
-    console.log("[FIXED] 07_FixedCosts シートが存在しません");
-    return [];
-  }
-
-  const data = sheet.getDataRange().getValues();
-  if (data.length <= 1) {
-    console.log("[FIXED] 07_FixedCosts データなし（ヘッダのみ）");
-    return [];
-  }
-
-  const headers = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
-  const idxName = headers.indexOf("name");
-  const idxAmount = headers.indexOf("amount");
-  const idxCategory = headers.indexOf("category");
-  const idxActive = headers.indexOf("active");
-
-  // 必須列チェック
-  if (idxAmount < 0) {
-    console.log("[FIXED] ERROR: amount列が見つかりません");
-    return [];
-  }
-  if (idxActive < 0) {
-    console.log("[FIXED] ERROR: active列が見つかりません");
-    return [];
-  }
-
-  const results = [];
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    var activeRaw = row[idxActive];
-    var activeStr = String(activeRaw).toUpperCase().trim();
-
-    // active判定
-    var isActive = (activeRaw === true) ||
-                   (activeStr === "TRUE") ||
-                   (activeStr === "1") ||
-                   (activeStr === "YES") ||
-                   (activeStr === "ON");
-
-    if (isActive) {
-      var name = String(row[idxName] || "").trim();
-
-      // amount: 数値 or カンマ入り文字列 "80,000" 両対応
-      var amtRaw = row[idxAmount];
-      var amt = 0;
-      if (typeof amtRaw === "number") {
-        amt = amtRaw;
-      } else {
-        // 文字列の場合：カンマ除去して数値化
-        amt = Number(String(amtRaw).replace(/,/g, "").trim());
-      }
-      if (!isFinite(amt)) amt = 0;
-
-      console.log("[FIXED] 行" + (i+1) + ": " + name + " ¥" + amt + " (raw=" + amtRaw + ", type=" + typeof amtRaw + ") active=" + activeRaw);
-
-      if (name && amt > 0) {
-        results.push({
-          name: name,
-          amount: amt,
-          category: String(row[idxCategory] || "").trim()
-        });
-      }
-    }
-  }
-
-  var total = results.reduce(function(s,r){return s+r.amount;},0);
-  console.log("[FIXED] 有効な固定費: " + results.length + "件, 合計: ¥" + total);
-  return results;
-}
+// 方針B: getActiveFixedCostsForInsights_ は不要（04_Transactionsから計算するため削除）
 
 function getDefaultFixedCategories_() {
   // MVP: よくある固定費カテゴリ。将来 01_Settings で設定化可能。
