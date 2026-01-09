@@ -76,19 +76,35 @@
   }
 
   /**
-   * クライアントコンテキスト
+   * クライアントコンテキスト（Phase6: client_request_id追加）
    */
   function clientContext_() {
     return {
+      client_request_id: generateUUID_(), // Phase6: 二重送信防止用
       client_time: new Date().toISOString(),
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo",
       device: "mobile",
-      ui_version: "0.1"
+      ui_version: "0.6"
     };
   }
 
   /**
-   * 結果フォーマット
+   * UUID生成（Phase6）
+   */
+  function generateUUID_() {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    // フォールバック
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c === "x" ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
+  /**
+   * 結果フォーマット（Phase6: fallback対応）
    */
   function formatResult(res) {
     if (!res) return "応答が空です";
@@ -103,8 +119,14 @@
     }
 
     const t = res.result.transaction;
+
+    // Phase6: AI失敗でも暫定保存された場合
+    const header = res.result.fallback
+      ? "暫定保存しました（AI解析失敗）"
+      : "記録しました";
+
     const lines = [
-      "記録しました",
+      header,
       `id: ${t.id}`,
       `date: ${t.date || "(未確定)"}`,
       `type: ${t.type}`,
@@ -119,6 +141,12 @@
       for (const q of res.result.clarification.questions) {
         lines.push("- " + q);
       }
+    }
+
+    // Phase6: fallback時の元エラー情報
+    if (res.result.fallback && res.result.original_error) {
+      lines.push("\n【エラー詳細】");
+      lines.push(res.result.original_error);
     }
 
     return lines.join("\n");

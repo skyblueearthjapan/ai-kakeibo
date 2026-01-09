@@ -280,3 +280,67 @@ function getSettingsCurrency_() {
     return "JPY";
   }
 }
+
+/** ========== Phase 6: AI失敗時の暫定保存 ========== */
+
+/**
+ * OpenAI失敗時に暫定行を保存（status=needs_review）
+ * @param {string} rawText 入力テキスト
+ * @param {string} receiptFileId レシートファイルID（あれば）
+ * @param {string} source "text" or "receipt"
+ * @param {Error} originalError 元のエラー
+ * @param {string} traceId
+ * @return {{ id: string, row: Object }}
+ */
+function saveFallbackTransaction_(rawText, receiptFileId, source, originalError, traceId) {
+  const errInfo = normalizeError_(originalError, traceId);
+  const errCode = errInfo.code || "E_UNKNOWN";
+
+  // 暫定行データを作成
+  const fallbackRow = {
+    id: generateTransactionId_(),
+    date: "", // 日付不明
+    type: "expense",
+    account: "",
+    merchant: "",
+    item: "",
+    category: "その他",
+    subcategory: "",
+    payment_method: "",
+    amount: 0,
+    memo: `OPENAI_FAILED:${errCode}`,
+    tags: "",
+    status: "needs_review",
+    source: source,
+    raw_text: String(rawText).substring(0, 1000), // 長すぎる場合は切り詰め
+    receipt_file_id: receiptFileId || "",
+    trace_id: traceId,
+    confidence: 0,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  // シートに追記
+  const appendedId = appendTransactionRow_(fallbackRow, traceId);
+
+  return {
+    id: appendedId,
+    row: fallbackRow
+  };
+}
+
+/**
+ * 取引IDを生成
+ */
+function generateTransactionId_() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = ("0" + (d.getMonth() + 1)).slice(-2);
+  const day = ("0" + d.getDate()).slice(-2);
+  const hh = ("0" + d.getHours()).slice(-2);
+  const mm = ("0" + d.getMinutes()).slice(-2);
+  const ss = ("0" + d.getSeconds()).slice(-2);
+  const rand = Utilities.getUuid().slice(0, 8);
+  return `TXN_${y}${m}${day}_${hh}${mm}${ss}_${rand}`;
+}
+

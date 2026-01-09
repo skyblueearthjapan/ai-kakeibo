@@ -1,6 +1,6 @@
 /**
  * 家計簿チャットボット - メインエントリーポイント
- * Phase 1+2: テキスト入力 + レシート撮影
+ * Phase 1-6: テキスト入力 + レシート撮影 + 履歴 + ダッシュボード + インサイト + 運用強化
  */
 
 function doGet() {
@@ -18,30 +18,96 @@ function include(filename) {
 /**
  * UI -> GAS: テキスト入力を処理
  * @param {string} text
- * @param {Object=} clientContext
+ * @param {Object=} clientContext { client_request_id }
  * @return {Object} TransactionResult
  */
 function processText(text, clientContext) {
   const traceId = makeTraceId_();
   const started = Date.now();
+  const clientRequestId = clientContext?.client_request_id || null;
 
   try {
+    // Phase6: 二重送信チェック
+    if (clientRequestId) {
+      const dup = checkDuplicate_(clientRequestId);
+      if (dup) {
+        logSuccess_(traceId, "processText", Date.now() - started, { txn_id: dup.result?.appended_id, input_size: 0 });
+        return dup; // 前回の結果を返す
+      }
+
+      // 処理中ロック取得
+      if (!tryAcquireProcessingLock_(clientRequestId)) {
+        throw makeAppError_("E_DUPLICATE_REQUEST", "Request already in progress", traceId, false, "処理中です。しばらくお待ちください。");
+      }
+    }
+
     if (!text || String(text).trim() === "") {
       throw makeAppError_("E_BAD_REQUEST", "Text is empty", traceId, false, "入力が空です。金額や店名を入力してください。");
     }
 
-    const ai = withOpenAIRetry_(() => callOpenAI_TextToTransaction_(String(text), clientContext, traceId), traceId);
+    const rawText = String(text).trim();
+    let ai = null;
+    let appendedId = null;
+    let mapped = null;
 
-    const mapped = mapAiToRow_(ai, {
-      source: "text",
-      rawText: String(text),
-      receiptFileId: ""
+    try {
+      // OpenAI呼び出し（retry内蔵）
+      ai = callOpenAI_TextToTransaction_(rawText, clientContext, traceId);
+
+      mapped = mapAiToRow_(ai, {
+        source: "text",
+        rawText: rawText,
+        receiptFileId: ""
+      });
+
+      appendedId = appendTransactionRow_(mapped, traceId);
+
+    } catch (aiErr) {
+      // Phase6: OpenAI失敗時は暫定行を保存
+      const fallback = saveFallbackTransaction_(rawText, "", "text", aiErr, traceId);
+      appendedId = fallback.id;
+      mapped = fallback.row;
+
+      // エラーログ
+      logError_(traceId, "processText", Date.now() - started, normalizeError_(aiErr, traceId).code, String(aiErr), { input_size: rawText.length });
+
+      // 暫定保存成功時は成功扱いで返す（ユーザーは履歴から編集可能）
+      const result = makeFallbackOkResult_(mapped, appendedId, started, aiErr);
+
+      if (clientRequestId) {
+        markAsProcessed_(clientRequestId, appendedId, result);
+        releaseProcessingLock_(clientRequestId);
+      }
+
+      return result;
+    }
+
+    const result = makeOkResult_(mapped, appendedId, started);
+
+    // Phase6: 成功ログ + デデュープ登録
+    logSuccess_(traceId, "processText", Date.now() - started, {
+      txn_id: appendedId,
+      input_size: rawText.length,
+      model: ai?.__openai_model,
+      tokens_in: ai?.__openai_usage?.input || 0,
+      tokens_out: ai?.__openai_usage?.output || 0
     });
 
-    const appendedId = appendTransactionRow_(mapped, traceId);
+    if (clientRequestId) {
+      markAsProcessed_(clientRequestId, appendedId, result);
+      releaseProcessingLock_(clientRequestId);
+    }
 
-    return makeOkResult_(mapped, appendedId, started);
+    return result;
+
   } catch (err) {
+    const durationMs = Date.now() - started;
+    logError_(traceId, "processText", durationMs, normalizeError_(err, traceId).code, String(err), {});
+
+    if (clientRequestId) {
+      releaseProcessingLock_(clientRequestId);
+    }
+
     return makeErrResult_(err, traceId, started);
   }
 }
@@ -49,19 +115,34 @@ function processText(text, clientContext) {
 /**
  * UI -> GAS: レシート画像を処理
  * @param {string} dataUrl e.g. data:image/jpeg;base64,....
- * @param {Object=} clientContext
+ * @param {Object=} clientContext { client_request_id }
  * @return {Object} TransactionResult
  */
 function processReceipt(dataUrl, clientContext) {
   const traceId = makeTraceId_();
   const started = Date.now();
+  const clientRequestId = clientContext?.client_request_id || null;
 
   try {
+    // Phase6: 二重送信チェック
+    if (clientRequestId) {
+      const dup = checkDuplicate_(clientRequestId);
+      if (dup) {
+        logSuccess_(traceId, "processReceipt", Date.now() - started, { txn_id: dup.result?.appended_id, input_size: 0 });
+        return dup;
+      }
+
+      if (!tryAcquireProcessingLock_(clientRequestId)) {
+        throw makeAppError_("E_DUPLICATE_REQUEST", "Request already in progress", traceId, false, "処理中です。しばらくお待ちください。");
+      }
+    }
+
     if (!dataUrl || String(dataUrl).trim() === "") {
       throw makeAppError_("E_BAD_REQUEST", "dataUrl is empty", traceId, false, "画像が見つかりません。もう一度撮影してください。");
     }
 
     const parsed = parseDataUrl_(String(dataUrl), traceId);
+    const imageSize = Math.round(parsed.base64.length * 0.75);
 
     // Drive保存（任意：失敗しても続行）
     let receiptFileId = "";
@@ -72,21 +153,65 @@ function processReceipt(dataUrl, clientContext) {
       console.warn(`[${traceId}] Drive save failed: ${e}`);
     }
 
-    const ai = withOpenAIRetry_(
-      () => callOpenAI_ImageToTransaction_(parsed.mimeType, parsed.base64, clientContext, traceId),
-      traceId
-    );
+    let ai = null;
+    let appendedId = null;
+    let mapped = null;
 
-    const mapped = mapAiToRow_(ai, {
-      source: "receipt",
-      rawText: "(receipt)",
-      receiptFileId: receiptFileId
+    try {
+      ai = callOpenAI_ImageToTransaction_(parsed.mimeType, parsed.base64, clientContext, traceId);
+
+      mapped = mapAiToRow_(ai, {
+        source: "receipt",
+        rawText: "(receipt)",
+        receiptFileId: receiptFileId
+      });
+
+      appendedId = appendTransactionRow_(mapped, traceId);
+
+    } catch (aiErr) {
+      // Phase6: OpenAI失敗時は暫定行を保存
+      const fallback = saveFallbackTransaction_("(receipt)", receiptFileId, "receipt", aiErr, traceId);
+      appendedId = fallback.id;
+      mapped = fallback.row;
+
+      logError_(traceId, "processReceipt", Date.now() - started, normalizeError_(aiErr, traceId).code, String(aiErr), { input_size: imageSize });
+
+      const result = makeFallbackOkResult_(mapped, appendedId, started, aiErr);
+
+      if (clientRequestId) {
+        markAsProcessed_(clientRequestId, appendedId, result);
+        releaseProcessingLock_(clientRequestId);
+      }
+
+      return result;
+    }
+
+    const result = makeOkResult_(mapped, appendedId, started);
+
+    logSuccess_(traceId, "processReceipt", Date.now() - started, {
+      txn_id: appendedId,
+      receipt_file_id: receiptFileId,
+      input_size: imageSize,
+      model: ai?.__openai_model,
+      tokens_in: ai?.__openai_usage?.input || 0,
+      tokens_out: ai?.__openai_usage?.output || 0
     });
 
-    const appendedId = appendTransactionRow_(mapped, traceId);
+    if (clientRequestId) {
+      markAsProcessed_(clientRequestId, appendedId, result);
+      releaseProcessingLock_(clientRequestId);
+    }
 
-    return makeOkResult_(mapped, appendedId, started);
+    return result;
+
   } catch (err) {
+    const durationMs = Date.now() - started;
+    logError_(traceId, "processReceipt", durationMs, normalizeError_(err, traceId).code, String(err), {});
+
+    if (clientRequestId) {
+      releaseProcessingLock_(clientRequestId);
+    }
+
     return makeErrResult_(err, traceId, started);
   }
 }
@@ -127,6 +252,29 @@ function makeOkResult_(mappedRow, appendedId, startedMs) {
   };
 }
 
+/**
+ * Phase6: AI失敗時の暫定保存成功結果
+ */
+function makeFallbackOkResult_(mappedRow, appendedId, startedMs, originalError) {
+  const durationMs = Date.now() - startedMs;
+  const errInfo = normalizeError_(originalError, "");
+
+  return {
+    ok: true,
+    result: {
+      transaction: mappedRow,
+      appended_id: appendedId,
+      clarification: {
+        needs_clarification: true,
+        questions: ["AI解析に失敗したため、手動で入力内容を確認・修正してください。"]
+      },
+      fallback: true,
+      original_error: errInfo.userMessage || "AI解析に失敗しました",
+      meta: { duration_ms: durationMs }
+    }
+  };
+}
+
 function makeErrResult_(err, traceId, startedMs) {
   const durationMs = Date.now() - startedMs;
   const appErr = normalizeError_(err, traceId);
@@ -142,26 +290,6 @@ function makeErrResult_(err, traceId, startedMs) {
       meta: { duration_ms: durationMs }
     }
   };
-}
-
-/**
- * OpenAI一時失敗時の簡易リトライ（最大2回）
- */
-function withOpenAIRetry_(fn, traceId) {
-  const maxAttempts = 2;
-  let lastErr = null;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return fn();
-    } catch (e) {
-      lastErr = e;
-      const n = normalizeError_(e, traceId);
-      if (!n.retryable || attempt === maxAttempts) throw e;
-      Utilities.sleep(attempt === 1 ? 300 : 1000);
-    }
-  }
-  throw lastErr;
 }
 
 /**
@@ -196,6 +324,7 @@ function listTransactions(monthStart, filters) {
 
     const values = getTransactionsAllValues_();
     if (values.length <= 1) {
+      logSuccess_(traceId, "listTransactions", Date.now() - started, {});
       return {
         ok: true,
         result: {
@@ -239,6 +368,8 @@ function listTransactions(monthStart, filters) {
     const limitedRows = rows.slice(0, limit);
     const limitedUndated = undatedRows.slice(0, limit);
 
+    logSuccess_(traceId, "listTransactions", Date.now() - started, {});
+
     return {
       ok: true,
       result: {
@@ -250,6 +381,7 @@ function listTransactions(monthStart, filters) {
     };
 
   } catch (err) {
+    logError_(traceId, "listTransactions", Date.now() - started, normalizeError_(err, traceId).code, String(err), {});
     return makeErrResult_(err, traceId, started);
   }
 }
@@ -276,7 +408,7 @@ function updateTransaction(id, patch) {
     // パッチ検証
     validatePatch_(patch, traceId);
 
-    return withSheetLock_(() => {
+    const result = withSheetLock_(() => {
       const sheet = getSheetByName_("04_Transactions");
       const values = sheet.getDataRange().getValues();
       const idxMap = buildTransactionsHeaderIndex_(values[0]);
@@ -303,7 +435,11 @@ function updateTransaction(id, patch) {
       };
     });
 
+    logSuccess_(traceId, "updateTransaction", Date.now() - started, { txn_id: id });
+    return result;
+
   } catch (err) {
+    logError_(traceId, "updateTransaction", Date.now() - started, normalizeError_(err, traceId).code, String(err), {});
     return makeErrResult_(err, traceId, started);
   }
 }
@@ -330,6 +466,8 @@ function getDashboard(monthStart, opts) {
     // 通貨設定を取得
     const currency = getSettingsCurrency_();
 
+    logSuccess_(traceId, "getDashboard", Date.now() - started, {});
+
     return {
       ok: true,
       result: {
@@ -343,6 +481,7 @@ function getDashboard(monthStart, opts) {
     };
 
   } catch (err) {
+    logError_(traceId, "getDashboard", Date.now() - started, normalizeError_(err, traceId).code, String(err), {});
     return makeErrResult_(err, traceId, started);
   }
 }
@@ -380,6 +519,8 @@ function getInsights(monthStart, opts) {
     const ins = buildInsights_(txns, ms, opts || {});
     const currency = getSettingsCurrency_() || "JPY";
 
+    logSuccess_(traceId, "getInsights", Date.now() - started, {});
+
     return {
       ok: true,
       result: {
@@ -397,6 +538,7 @@ function getInsights(monthStart, opts) {
       }
     };
   } catch (err) {
+    logError_(traceId, "getInsights", Date.now() - started, normalizeError_(err, traceId).code, String(err), {});
     return makeErrResult_(err, traceId, started);
   }
 }

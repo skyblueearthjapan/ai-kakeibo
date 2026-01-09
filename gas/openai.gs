@@ -1,10 +1,11 @@
 /**
  * OpenAI Responses API ラッパー
  * Structured Outputs (json_schema) で TransactionAI を返す
+ * Phase6: retry/timeout/usage強化
  */
 
 function callOpenAI_TextToTransaction_(text, clientContext, traceId) {
-  const model = getProp_("OPENAI_MODEL_TEXT", "gpt-4o-mini");
+  const model = getModelText_(); // config.gsから取得
   const schema = getTransactionAiSchema_();
 
   const payload = {
@@ -29,11 +30,11 @@ function callOpenAI_TextToTransaction_(text, clientContext, traceId) {
     }
   };
 
-  return fetchTransactionFromOpenAI_(payload, traceId);
+  return fetchTransactionFromOpenAI_(payload, traceId, "processText", text.length);
 }
 
 function callOpenAI_ImageToTransaction_(mimeType, base64, clientContext, traceId) {
-  const model = getProp_("OPENAI_MODEL_IMAGE", "gpt-4o-mini");
+  const model = getModelImage_(); // config.gsから取得
   const schema = getTransactionAiSchema_();
 
   const payload = {
@@ -61,71 +62,193 @@ function callOpenAI_ImageToTransaction_(mimeType, base64, clientContext, traceId
     }
   };
 
-  return fetchTransactionFromOpenAI_(payload, traceId);
+  // 画像サイズ（base64デコード後のバイト数概算）
+  const imageSize = Math.round(base64.length * 0.75);
+
+  return fetchTransactionFromOpenAI_(payload, traceId, "processReceipt", imageSize);
 }
 
-function fetchTransactionFromOpenAI_(payload, traceId) {
+/**
+ * OpenAI APIを呼び出し（リトライ付き）
+ */
+function fetchTransactionFromOpenAI_(payload, traceId, operation, inputSize) {
   const apiKey = getRequiredProp_("OPENAI_API_KEY");
   const url = "https://api.openai.com/v1/responses";
+  const timeout = getOpenAITimeout_();
+  const maxRetries = getOpenAIMaxRetries_();
+  const model = payload.model;
 
-  let res;
-  try {
-    res = UrlFetchApp.fetch(url, {
-      method: "post",
-      headers: {
-        Authorization: "Bearer " + apiKey,
-        "Content-Type": "application/json"
-      },
-      payload: JSON.stringify(payload),
-      muteHttpExceptions: true
-    });
-  } catch (e) {
-    throw makeAppError_("E_OPENAI_TIMEOUT", `UrlFetch failed: ${e}`, traceId, true, "通信が混雑しています。もう一度お試しください。");
+  let lastError = null;
+  let attempt = 0;
+
+  while (attempt < maxRetries) {
+    attempt++;
+    const callStarted = Date.now();
+
+    let res;
+    try {
+      res = UrlFetchApp.fetch(url, {
+        method: "post",
+        headers: {
+          Authorization: "Bearer " + apiKey,
+          "Content-Type": "application/json"
+        },
+        payload: JSON.stringify(payload),
+        muteHttpExceptions: true,
+        timeout: timeout
+      });
+    } catch (e) {
+      const callDuration = Date.now() - callStarted;
+      logOpenAICall_(traceId, operation, model, 0, 0, callDuration, false, String(e));
+
+      lastError = makeAppError_("E_OPENAI_TIMEOUT", `UrlFetch failed: ${e}`, traceId, true, "通信が混雑しています。もう一度お試しください。");
+
+      if (attempt < maxRetries) {
+        Utilities.sleep(getBackoffDelay_(attempt));
+        continue;
+      }
+      throw lastError;
+    }
+
+    const callDuration = Date.now() - callStarted;
+    const status = res.getResponseCode();
+    const bodyText = res.getContentText();
+
+    // レート制限/サーバーエラーはリトライ
+    if (status === 429 || status >= 500) {
+      logOpenAICall_(traceId, operation, model, 0, 0, callDuration, false, `HTTP ${status}: ${truncate_(bodyText, 200)}`);
+
+      const code = status === 429 ? "E_OPENAI_RATE_LIMIT" : "E_OPENAI_SERVER_ERROR";
+      lastError = makeAppError_(
+        code,
+        `OpenAI HTTP ${status}: ${truncate_(bodyText, 500)}`,
+        traceId,
+        true,
+        status === 429 ? "混雑しています。少し待って再送してください。" : "AI解析に失敗しました。もう一度お試しください。"
+      );
+
+      if (attempt < maxRetries) {
+        Utilities.sleep(getBackoffDelay_(attempt));
+        continue;
+      }
+      throw lastError;
+    }
+
+    // 認証/権限エラーはリトライしない
+    if (status === 401 || status === 403) {
+      logOpenAICall_(traceId, operation, model, 0, 0, callDuration, false, `HTTP ${status}: Auth error`);
+      throw makeAppError_(
+        "E_OPENAI_QUOTA",
+        `OpenAI HTTP ${status}: ${truncate_(bodyText, 500)}`,
+        traceId,
+        false,
+        "AI解析に失敗しました。管理者に連絡してください。"
+      );
+    }
+
+    // その他の4xxエラー
+    if (status >= 400) {
+      logOpenAICall_(traceId, operation, model, 0, 0, callDuration, false, `HTTP ${status}: ${truncate_(bodyText, 200)}`);
+      throw makeAppError_(
+        "E_OPENAI_BAD_RESPONSE",
+        `OpenAI HTTP ${status}: ${truncate_(bodyText, 500)}`,
+        traceId,
+        false,
+        "AI解析に失敗しました。もう一度お試しください。"
+      );
+    }
+
+    // 成功時のパース
+    let body;
+    try {
+      body = JSON.parse(bodyText);
+    } catch (e) {
+      logOpenAICall_(traceId, operation, model, 0, 0, callDuration, false, `Invalid JSON: ${truncate_(bodyText, 100)}`);
+
+      lastError = makeAppError_("E_OPENAI_BAD_RESPONSE", `Invalid JSON response: ${truncate_(bodyText, 200)}`, traceId, true, "AI応答の解析に失敗しました。再度お試しください。");
+
+      if (attempt < maxRetries) {
+        Utilities.sleep(getBackoffDelay_(attempt));
+        continue;
+      }
+      throw lastError;
+    }
+
+    // usage情報を抽出
+    const usage = extractUsage_(body);
+
+    const jsonText = extractStructuredJsonText_(body);
+    if (!jsonText) {
+      logOpenAICall_(traceId, operation, model, usage.input, usage.output, callDuration, false, "No structured output");
+
+      lastError = makeAppError_("E_PARSE_FAILED", `No structured output text found`, traceId, true, "AI応答の解析に失敗しました。もう一度お試しください。");
+
+      if (attempt < maxRetries) {
+        Utilities.sleep(getBackoffDelay_(attempt));
+        continue;
+      }
+      throw lastError;
+    }
+
+    let ai;
+    try {
+      ai = JSON.parse(jsonText);
+    } catch (e) {
+      logOpenAICall_(traceId, operation, model, usage.input, usage.output, callDuration, false, `Parse structured JSON failed: ${truncate_(jsonText, 100)}`);
+
+      lastError = makeAppError_("E_PARSE_FAILED", `Failed to parse structured JSON: ${truncate_(jsonText, 200)}`, traceId, true, "AI応答の解析に失敗しました。もう一度お試しください。");
+
+      if (attempt < maxRetries) {
+        Utilities.sleep(getBackoffDelay_(attempt));
+        continue;
+      }
+      throw lastError;
+    }
+
+    if (!ai || ai.type !== "transaction") {
+      if (ai && ai.type === "unknown") {
+        // 成功ログ
+        logOpenAICall_(traceId, operation, model, usage.input, usage.output, callDuration, true, "");
+        return ai;
+      }
+
+      logOpenAICall_(traceId, operation, model, usage.input, usage.output, callDuration, false, `Unexpected type: ${ai?.type}`);
+      throw makeAppError_("E_PARSE_FAILED", `Unexpected AI object: ${truncate_(jsonText, 200)}`, traceId, true, "AI応答の形式が不正です。もう一度お試しください。");
+    }
+
+    // 成功ログ
+    logOpenAICall_(traceId, operation, model, usage.input, usage.output, callDuration, true, "");
+
+    // usage情報をAIオブジェクトに付与（ログ用）
+    ai.__openai_usage = usage;
+    ai.__openai_model = model;
+
+    return ai;
   }
 
-  const status = res.getResponseCode();
-  const bodyText = res.getContentText();
+  throw lastError || new Error("Unexpected: no result after retries");
+}
 
-  if (status >= 400) {
-    const retryable = (status === 429 || status >= 500);
-    const code = status === 429 ? "E_OPENAI_RATE_LIMIT"
-      : status === 401 || status === 403 ? "E_OPENAI_QUOTA"
-      : "E_OPENAI_BAD_RESPONSE";
-
-    throw makeAppError_(
-      code,
-      `OpenAI HTTP ${status}: ${truncate_(bodyText, 500)}`,
-      traceId,
-      retryable,
-      status === 429 ? "混雑しています。少し待って再送してください。" : "AI解析に失敗しました。もう一度お試しください。"
-    );
+/**
+ * usage情報を抽出
+ */
+function extractUsage_(body) {
+  if (body && body.usage) {
+    return {
+      input: body.usage.input_tokens || body.usage.prompt_tokens || 0,
+      output: body.usage.output_tokens || body.usage.completion_tokens || 0
+    };
   }
+  return { input: 0, output: 0 };
+}
 
-  let body;
-  try {
-    body = JSON.parse(bodyText);
-  } catch (e) {
-    throw makeAppError_("E_OPENAI_BAD_RESPONSE", `Invalid JSON response: ${truncate_(bodyText, 200)}`, traceId, true, "AI応答の解析に失敗しました。再度お試しください。");
-  }
-
-  const jsonText = extractStructuredJsonText_(body);
-  if (!jsonText) {
-    throw makeAppError_("E_PARSE_FAILED", `No structured output text found`, traceId, true, "AI応答の解析に失敗しました。もう一度お試しください。");
-  }
-
-  let ai;
-  try {
-    ai = JSON.parse(jsonText);
-  } catch (e) {
-    throw makeAppError_("E_PARSE_FAILED", `Failed to parse structured JSON: ${truncate_(jsonText, 200)}`, traceId, true, "AI応答の解析に失敗しました。もう一度お試しください。");
-  }
-
-  if (!ai || ai.type !== "transaction") {
-    if (ai && ai.type === "unknown") return ai;
-    throw makeAppError_("E_PARSE_FAILED", `Unexpected AI object: ${truncate_(jsonText, 200)}`, traceId, true, "AI応答の形式が不正です。もう一度お試しください。");
-  }
-
-  return ai;
+/**
+ * 指数バックオフ遅延（ms）
+ */
+function getBackoffDelay_(attempt) {
+  // 300ms, 1000ms, 3000ms...
+  const base = 300;
+  return Math.min(base * Math.pow(3, attempt - 1), 10000);
 }
 
 /**
