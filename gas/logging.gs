@@ -154,27 +154,14 @@ function getAppVersion_() {
 }
 
 /**
- * シンプルなログ追記（失敗しても絶対に処理を止めない）
+ * シンプルなログ追記（スプレッドシートに書かず console.log のみ）
  * @param {string} level ログレベル（INFO, ERROR, WARN）
  * @param {string} message メッセージ
  * @param {string} traceId トレースID
  */
 function appendLog_(level, message, traceId) {
-  try {
-    const sheet = getOrCreateLogSheet_();
-    sheet.appendRow([
-      new Date().toISOString(),
-      traceId || "",
-      "appendLog",
-      level || "INFO",
-      "",
-      String(message || "").slice(0, 500),
-      0, "", 0, "", 0, 0, 0, getAppVersion_(), "", ""
-    ]);
-  } catch (e) {
-    // ログ失敗では絶対に処理を止めない
-    console.log(`Log write failed: ${e}`);
-  }
+  // スプレッドシートへの書き込みは権限エラーの原因になるため、console.logのみ使用
+  console.log(`[${level}] trace=${traceId} ${message}`);
 }
 
 /**

@@ -11,7 +11,8 @@ function appendTransactionRow_(rowObj, traceId) {
   // getSheet_ を使用（openById経由・WebApp安全）
   const sh = getSheet_("04_Transactions");
 
-  const lock = LockService.getDocumentLock();
+  // DocumentLock は WebApp で失敗するため ScriptLock を使用
+  const lock = LockService.getScriptLock();
   lock.waitLock(15000);
 
   try {
