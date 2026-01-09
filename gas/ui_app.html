@@ -768,6 +768,15 @@
     if (queryFilter) filters.query = queryFilter;
     filters.includeUndated = false;  // 日付未設定は非表示
 
+    // フィルタ情報を保存（サマリー用）
+    const filterLabels = {
+      month: currentMonthStart,
+      status: statusFilter,
+      category: categoryFilter,
+      payment: paymentFilter,
+      query: queryFilter
+    };
+
     $("historyLoading").style.display = "block";
     $("historyList").innerHTML = "";
     $("historyEmpty").style.display = "none";
@@ -779,6 +788,7 @@
         if (!res || !res.ok) {
           $("historyEmpty").style.display = "block";
           $("historyEmpty").textContent = res?.error?.user_message || "読み込みに失敗しました";
+          updateHistorySummary_([], filterLabels);
           return;
         }
 
@@ -796,6 +806,9 @@
             );
           }
 
+          // サマリー更新
+          updateHistorySummary_(filtered, filterLabels);
+
           if (filtered.length > 0) {
             $("historyList").innerHTML = filtered.map(renderHistoryCard).join("");
           } else {
@@ -803,6 +816,7 @@
             $("historyEmpty").textContent = "該当する取引がありません";
           }
         } else {
+          updateHistorySummary_([], filterLabels);
           $("historyEmpty").style.display = "block";
           $("historyEmpty").textContent = "該当する取引がありません";
         }
@@ -811,6 +825,7 @@
         $("historyLoading").style.display = "none";
         $("historyEmpty").style.display = "block";
         $("historyEmpty").textContent = "読み込みエラー: " + (e?.message || String(e));
+        updateHistorySummary_([], filterLabels);
       })
       .listTransactions(currentMonthStart, filters);
   }
@@ -822,6 +837,63 @@
     searchTimeout = setTimeout(() => {
       loadHistory();
     }, 300);
+  }
+
+  /**
+   * フィルタ状態からサマリーのラベルを生成
+   */
+  function buildSummaryLabels_(filters) {
+    const statusLabels = {
+      pending: "未確定",
+      needs_review: "要確認",
+      confirmed: "確定済み"
+    };
+
+    const parts = [];
+
+    // 優先順：カテゴリ → 支払い方法 → ステータス
+    if (filters.category) parts.push(filters.category);
+    if (!parts.length && filters.payment) parts.push(filters.payment);
+    if (!parts.length && filters.status) parts.push(statusLabels[filters.status] || filters.status);
+
+    // 月表示（YYYY-MM形式）
+    const monthLabel = filters.month ? filters.month.slice(0, 7) : "";
+
+    const title = parts.length
+      ? `${parts.join(" / ")} 合計`
+      : (monthLabel ? `${monthLabel} の合計` : "合計金額");
+
+    // サブ：条件の説明
+    const subParts = [];
+    if (filters.query) subParts.push(`検索: ${filters.query}`);
+    if (filters.category && parts[0] !== filters.category) subParts.push(`カテゴリ: ${filters.category}`);
+    if (filters.payment && parts[0] !== filters.payment) subParts.push(`支払: ${filters.payment}`);
+    if (filters.status && parts[0] !== (statusLabels[filters.status] || filters.status)) {
+      subParts.push(`状態: ${statusLabels[filters.status] || filters.status}`);
+    }
+
+    const sub = subParts.join(" / ");
+    return { title, sub };
+  }
+
+  /**
+   * 履歴サマリーを更新（合計金額・件数・タイトル）
+   */
+  function updateHistorySummary_(transactions, filters) {
+    const sum = (transactions || []).reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const cnt = (transactions || []).length;
+
+    const labels = buildSummaryLabels_(filters);
+
+    const sumTitle = $("sumTitle");
+    const sumSub = $("sumSub");
+    const sumAmount = $("sumAmount");
+    const sumCount = $("sumCount");
+
+    if (sumTitle) sumTitle.textContent = labels.title;
+    if (sumSub) sumSub.textContent = labels.sub || "";
+    if (sumAmount) sumAmount.textContent = `¥${sum.toLocaleString()}`;
+    if (sumCount) sumCount.textContent = `${cnt}件`;
   }
 
   function renderHistoryCard(txn) {
