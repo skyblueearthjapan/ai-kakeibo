@@ -4,24 +4,25 @@
  * - getActiveSpreadsheet() はWebアプリ実行時に失敗するため禁止
  */
 
+// ★ 直接設定: ここにスプレッドシートIDを記載（最も確実）
+const HARDCODED_SPREADSHEET_ID_ = "1a2rTbAwIBYfH0CstleN15VvUwk4AyisJJ3QFyok8uWY";
+
 /**
  * スプレッドシートIDを取得
- * 優先順位: Script Properties > 01_Settings KV > コンテナバインド（フォールバック）
+ * 優先順位: ハードコード > Script Properties > フォールバック
  */
 function getSpreadsheetId_() {
-  // 1) Script Properties（最優先・推奨）
-  const props = PropertiesService.getScriptProperties();
-  const id1 = props.getProperty("SPREADSHEET_ID");
-  if (id1) return id1.trim();
-
-  // 2) 01_Settings key-value（次点）
-  // 注意: getConfigKV_ は config.gs で定義されている
-  try {
-    const cfg = typeof getConfigKV_ === "function" ? getConfigKV_() : {};
-    if (cfg.SPREADSHEET_ID) return String(cfg.SPREADSHEET_ID).trim();
-  } catch (_) {
-    // getConfigKV_ が未定義またはエラーの場合は無視
+  // 1) ハードコードされたID（最優先・最も確実）
+  if (HARDCODED_SPREADSHEET_ID_ && HARDCODED_SPREADSHEET_ID_.length > 10) {
+    return HARDCODED_SPREADSHEET_ID_;
   }
+
+  // 2) Script Properties
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const id1 = props.getProperty("SPREADSHEET_ID");
+    if (id1) return id1.trim();
+  } catch (_) {}
 
   // 3) フォールバック：コンテナバインドならOK（standaloneだと失敗し得る）
   try {
@@ -29,7 +30,7 @@ function getSpreadsheetId_() {
     if (ss) return ss.getId();
   } catch (_) {}
 
-  throw new Error("SPREADSHEET_ID is missing. Set it in Script Properties or 01_Settings.");
+  throw new Error("SPREADSHEET_ID is missing.");
 }
 
 /**
