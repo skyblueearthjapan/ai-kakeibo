@@ -967,8 +967,128 @@
       .saveTransactionDraft(draft, clientContext_());
   }
 
+  /* ========== Phase 8: カメラ/音声入力 ========== */
+
+  // 音声認識インスタンス
+  let recognition = null;
+  let listening = false;
+
+  /**
+   * カメラ/写真からのファイル処理
+   */
+  async function handleReceiptFile_(file, source) {
+    if (!file) return;
+
+    setOcrStatus("画像を準備しています...", "processing");
+
+    try {
+      const dataUrl = await resizeImageToDataUrl_(file, 1280, 0.75);
+      setOcrStatus("レシートを解析中...", "processing");
+
+      google.script.run
+        .withSuccessHandler((res) => {
+          if (!res || !res.ok) {
+            setOcrStatus("解析に失敗しました", "error");
+            return;
+          }
+          populateFormFromDraft(res.result.draft);
+          setOcrStatus("読み取り完了！内容を確認してください", "success");
+        })
+        .withFailureHandler((err) => {
+          setOcrStatus("エラー: " + (err?.message || String(err)), "error");
+        })
+        .processReceiptV2(dataUrl, clientContext_());
+
+    } catch (e) {
+      setOcrStatus("画像処理に失敗しました", "error");
+    }
+  }
+
+  /**
+   * 音声入力のセットアップ
+   */
+  function setupVoiceInput_() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const btn = $("btnMic");
+
+    if (!SR) {
+      // 非対応ブラウザ
+      btn.disabled = true;
+      btn.innerHTML = '<span class="assistBtn-icon">🎤</span> 音声入力（非対応）';
+      return;
+    }
+
+    recognition = new SR();
+    recognition.lang = "ja-JP";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+
+    recognition.onstart = () => {
+      listening = true;
+      btn.classList.add("listening");
+      btn.innerHTML = '<span class="assistBtn-icon">⏺</span> 録音中...';
+      $("voiceBox").style.display = "block";
+    };
+
+    recognition.onresult = (e) => {
+      let text = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        text += e.results[i][0].transcript;
+      }
+      $("voiceText").value = text.trim();
+    };
+
+    recognition.onend = () => {
+      listening = false;
+      btn.classList.remove("listening");
+      btn.innerHTML = '<span class="assistBtn-icon">🎤</span> 音声で入力';
+    };
+
+    recognition.onerror = (e) => {
+      listening = false;
+      btn.classList.remove("listening");
+      btn.innerHTML = '<span class="assistBtn-icon">🎤</span> 音声で入力';
+      if (e.error === "not-allowed") {
+        setOcrStatus("マイク権限が必要です。ブラウザ設定をご確認ください。", "error");
+      } else {
+        setOcrStatus("音声入力に失敗しました", "error");
+      }
+    };
+
+    btn.addEventListener("click", () => {
+      if (listening) {
+        recognition.stop();
+      } else {
+        recognition.start();
+      }
+    });
+  }
+
+  /**
+   * 音声認識結果をフォームに反映
+   */
+  function applyVoiceToForm_() {
+    const t = $("voiceText").value.trim();
+    if (!t) return;
+
+    // Phase8: メモ欄に追加
+    const memo = $("formMemo");
+    if (memo) {
+      memo.value = memo.value ? memo.value + " " + t : t;
+    }
+
+    setOcrStatus("音声テキストをメモに反映しました", "success");
+  }
+
+  /**
+   * 音声認識結果をクリア
+   */
+  function clearVoice_() {
+    $("voiceText").value = "";
+    $("voiceBox").style.display = "none";
+  }
+
   // DOMContentLoaded に入力タブ初期化を追加
-  const originalDOMContentLoaded = document.addEventListener;
   document.addEventListener("DOMContentLoaded", () => {
     const d = new Date(currentMonthStart);
     $("currentMonth").textContent = `${d.getFullYear()}-${("0" + (d.getMonth() + 1)).slice(-2)}`;
@@ -977,5 +1097,14 @@
 
     // Phase 7: 入力タブを初期化
     initInputTab();
+
+    // Phase 8: カメラ/写真イベント
+    const cam = $("receiptCam");
+    const pick = $("receiptPick");
+    if (cam) cam.addEventListener("change", () => handleReceiptFile_(cam.files[0], "camera"));
+    if (pick) pick.addEventListener("change", () => handleReceiptFile_(pick.files[0], "picker"));
+
+    // Phase 8: 音声入力セットアップ
+    setupVoiceInput_();
   });
 </script>

@@ -685,4 +685,89 @@
     flex: 1;
     margin-top: 0;
   }
+
+  /* ========== Phase 8: カメラ/音声入力UI ========== */
+
+  .assistBtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    margin-top: 10px;
+    padding: 14px;
+    border-radius: 16px;
+    font-size: 16px;
+    font-weight: 800;
+    text-align: center;
+    border: none;
+    cursor: pointer;
+  }
+
+  .assistBtn-icon {
+    font-size: 20px;
+  }
+
+  .assistBtn.primary {
+    background: #111827;
+    color: #fff;
+  }
+
+  .assistBtn.secondary {
+    background: #ffffff;
+    color: #111827;
+    border: 1px solid rgba(17, 24, 39, 0.15);
+  }
+
+  .assistBtn.mic {
+    background: #FFE3EE;
+    color: #7A1F3D;
+  }
+
+  .assistBtn.mic:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .assistBtn.mic.listening {
+    background: #FFB3C7;
+    animation: pulse 1.2s infinite;
+  }
+
+  @keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.6; }
+    100% { opacity: 1; }
+  }
+
+  .voiceBox {
+    margin-top: 12px;
+    background: #fff;
+    border-radius: 14px;
+    padding: 10px;
+    border: 1px dashed rgba(17, 24, 39, 0.2);
+  }
+
+  .voiceBox textarea {
+    width: 100%;
+    min-height: 60px;
+    border-radius: 10px;
+    padding: 8px;
+    border: 1px solid rgba(17, 24, 39, 0.15);
+    resize: vertical;
+    font-size: 14px;
+  }
+
+  .voiceActions {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+  }
+
+  .voiceActions .btn {
+    flex: 1;
+    margin-top: 0;
+    height: 40px;
+    font-size: 14px;
+  }
 </style>

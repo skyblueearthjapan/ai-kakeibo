@@ -46,14 +46,40 @@
     </section>
   </main>
 
-  <!-- Phase7: 入力タブ（選択式フォーム） -->
+  <!-- Phase7+8: 入力タブ（選択式フォーム + カメラ/音声） -->
   <main id="tab-input" class="wrap tab-content">
-    <!-- レシートOCR -->
-    <section class="card pastel-mint">
-      <h3>レシートから入力</h3>
-      <input id="receiptV2" type="file" accept="image/*" capture="environment" />
-      <button id="btnOcr" class="btn secondary" onclick="scanReceipt()">レシートを読み取る</button>
+    <!-- Phase8: かんたん入力（カメラ/写真/音声） -->
+    <section class="card pastel-mint" id="inputAssistCard">
+      <h3>かんたん入力</h3>
+
+      <!-- Camera -->
+      <label class="assistBtn primary">
+        <span class="assistBtn-icon">📷</span> カメラで撮影
+        <input id="receiptCam" type="file" accept="image/*" capture="environment" hidden />
+      </label>
+
+      <!-- Picker -->
+      <label class="assistBtn secondary">
+        <span class="assistBtn-icon">🖼</span> 写真から選ぶ
+        <input id="receiptPick" type="file" accept="image/*" hidden />
+      </label>
+
+      <!-- Voice -->
+      <button class="assistBtn mic" id="btnMic" type="button">
+        <span class="assistBtn-icon">🎤</span> 音声で入力
+      </button>
+
+      <!-- Voice Result -->
+      <div class="voiceBox" id="voiceBox" style="display:none;">
+        <textarea id="voiceText" rows="3" placeholder="音声認識結果が表示されます（編集できます）"></textarea>
+        <div class="voiceActions">
+          <button class="btn primary" type="button" onclick="applyVoiceToForm_()">フォームに反映</button>
+          <button class="btn secondary" type="button" onclick="clearVoice_()">クリア</button>
+        </div>
+      </div>
+
       <div id="ocrStatus" class="hint"></div>
+      <div class="hint">※ 撮影・音声入力がうまくいかない場合は、下のフォームから手入力してください</div>
     </section>
 
     <!-- 入力フォーム -->
