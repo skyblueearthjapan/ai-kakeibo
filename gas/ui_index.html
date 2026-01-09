@@ -130,6 +130,49 @@
         <canvas id="trendChart"></canvas>
       </div>
     </section>
+
+    <!-- Phase 5: インサイト -->
+    <!-- 前月比カード -->
+    <section class="card pastel-pink">
+      <h3>前月比</h3>
+      <div id="insightsLoading" class="loading" style="display:none;">読み込み中...</div>
+      <div id="momSection" class="mom-section">
+        <div class="mom-main">
+          <span id="momDelta" class="mom-delta">-</span>
+          <span id="momPct" class="mom-pct"></span>
+        </div>
+        <div class="mom-detail">
+          <span>今月: <span id="momThis">-</span></span>
+          <span>前月: <span id="momPrev">-</span></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 使いすぎTOP3 -->
+    <section class="card pastel-coral">
+      <h3>使いすぎカテゴリ TOP3</h3>
+      <div id="overspendList" class="insight-list"></div>
+      <div id="overspendEmpty" class="empty-message" style="display:none;">該当なし</div>
+    </section>
+
+    <!-- 節約TOP3 -->
+    <section class="card pastel-mint">
+      <h3>節約成功カテゴリ TOP3</h3>
+      <div id="savingsList" class="insight-list"></div>
+      <div id="savingsEmpty" class="empty-message" style="display:none;">該当なし</div>
+    </section>
+
+    <!-- 固定費比率 -->
+    <section class="card pastel-yellow">
+      <h3>固定費比率</h3>
+      <div id="fixedCostSection" class="fixed-cost-section">
+        <div class="fixed-ratio">
+          <span id="fixedRatio" class="fixed-ratio-value">-</span>
+          <span class="fixed-ratio-label">（<span id="fixedTotal">-</span>）</span>
+        </div>
+        <div id="fixedBreakdown" class="fixed-breakdown"></div>
+      </div>
+    </section>
   </main>
 
   <!-- 編集モーダル -->

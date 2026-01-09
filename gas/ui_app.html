@@ -415,6 +415,9 @@
         renderKpi(kpi, currency);
         renderCategoryChart(byCategory, currency);
         renderTrendChart(trend12m, currency);
+
+        // Phase 5: インサイトも読み込む
+        loadInsights();
       })
       .withFailureHandler((e) => {
         $("kpiLoading").style.display = "none";
@@ -554,5 +557,152 @@
         }
       }
     });
+  }
+
+  /* ========== Phase 5: インサイト ========== */
+
+  /**
+   * インサイトを読み込み
+   */
+  function loadInsights() {
+    $("insightsLoading").style.display = "block";
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        $("insightsLoading").style.display = "none";
+
+        if (!res || !res.ok) {
+          console.error("Insights load failed:", res?.error);
+          return;
+        }
+
+        const { summary, overspendTop3, savingsTop3, fixedCost, meta } = res.result;
+        const currency = meta?.currency || "JPY";
+
+        renderMoM(summary, currency);
+        renderOverspend(overspendTop3, currency);
+        renderSavings(savingsTop3, currency);
+        renderFixedCost(fixedCost, currency);
+      })
+      .withFailureHandler((e) => {
+        $("insightsLoading").style.display = "none";
+        console.error("Insights error:", e);
+      })
+      .getInsights(analyticsMonthStart, {});
+  }
+
+  /**
+   * 前月比表示
+   */
+  function renderMoM(summary, currency) {
+    const fmt = (n) => {
+      if (currency === "JPY") {
+        return "¥" + Math.abs(n).toLocaleString();
+      }
+      return currency + " " + Math.abs(n).toLocaleString();
+    };
+
+    const deltaEl = $("momDelta");
+    const delta = summary.delta;
+    const sign = delta >= 0 ? "+" : "-";
+    deltaEl.textContent = sign + fmt(delta);
+    deltaEl.className = "mom-delta " + (delta >= 0 ? "positive" : "negative");
+
+    const pctEl = $("momPct");
+    if (summary.delta_pct !== null) {
+      const pctSign = summary.delta_pct >= 0 ? "+" : "";
+      pctEl.textContent = `（${pctSign}${summary.delta_pct}%）`;
+    } else {
+      pctEl.textContent = "";
+    }
+
+    $("momThis").textContent = fmt(summary.expense);
+    $("momPrev").textContent = fmt(summary.prev_expense);
+  }
+
+  /**
+   * 使いすぎTOP3表示
+   */
+  function renderOverspend(list, currency) {
+    const container = $("overspendList");
+    const empty = $("overspendEmpty");
+
+    if (!list || list.length === 0) {
+      container.innerHTML = "";
+      empty.style.display = "block";
+      return;
+    }
+
+    empty.style.display = "none";
+    container.innerHTML = list.map(item => {
+      const amt = currency === "JPY" ? "¥" + item.delta.toLocaleString() : currency + " " + item.delta.toLocaleString();
+      const pct = item.delta_pct !== null ? `(+${item.delta_pct}%)` : "";
+      return `
+        <div class="insight-item">
+          <span class="insight-cat">${item.category}</span>
+          <span>
+            <span class="insight-delta overspend">+${amt}</span>
+            <span class="insight-pct">${pct}</span>
+          </span>
+        </div>
+      `;
+    }).join("");
+  }
+
+  /**
+   * 節約TOP3表示
+   */
+  function renderSavings(list, currency) {
+    const container = $("savingsList");
+    const empty = $("savingsEmpty");
+
+    if (!list || list.length === 0) {
+      container.innerHTML = "";
+      empty.style.display = "block";
+      return;
+    }
+
+    empty.style.display = "none";
+    container.innerHTML = list.map(item => {
+      const amt = currency === "JPY" ? "¥" + Math.abs(item.delta).toLocaleString() : currency + " " + Math.abs(item.delta).toLocaleString();
+      const pct = item.delta_pct !== null ? `(${item.delta_pct}%)` : "";
+      return `
+        <div class="insight-item">
+          <span class="insight-cat">${item.category}</span>
+          <span>
+            <span class="insight-delta savings">-${amt}</span>
+            <span class="insight-pct">${pct}</span>
+          </span>
+        </div>
+      `;
+    }).join("");
+  }
+
+  /**
+   * 固定費比率表示
+   */
+  function renderFixedCost(fixedCost, currency) {
+    const fmt = (n) => {
+      if (currency === "JPY") {
+        return "¥" + n.toLocaleString();
+      }
+      return currency + " " + n.toLocaleString();
+    };
+
+    $("fixedRatio").textContent = fixedCost.this_ratio_pct + "%";
+    $("fixedTotal").textContent = fmt(fixedCost.this_total);
+
+    const breakdown = fixedCost.breakdown || [];
+    if (breakdown.length === 0) {
+      $("fixedBreakdown").innerHTML = "<span class='empty-message'>固定費データなし</span>";
+      return;
+    }
+
+    $("fixedBreakdown").innerHTML = breakdown.map(item => `
+      <div class="fixed-item">
+        <span class="fixed-item-cat">${item.category}</span>
+        <span class="fixed-item-amt">${fmt(item.amount)}</span>
+      </div>
+    `).join("");
   }
 </script>

@@ -360,3 +360,43 @@ function normalizeMonthStart_(monthStart) {
   const m = ("0" + (d.getMonth() + 1)).slice(-2);
   return `${y}-${m}-01`;
 }
+
+/** ========== Phase 5: インサイト ========== */
+
+/**
+ * UI -> GAS: インサイトデータを取得
+ * @param {string} monthStart YYYY-MM-DD（月初）、未指定なら当月
+ * @param {Object=} opts { includeUnconfirmed }
+ * @return {Object} InsightsResult
+ */
+function getInsights(monthStart, opts) {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    const ms = normalizeMonthStart_(monthStart);
+    const txns = getAllTransactionsAsObjects_(traceId);
+
+    const ins = buildInsights_(txns, ms, opts || {});
+    const currency = getSettingsCurrency_() || "JPY";
+
+    return {
+      ok: true,
+      result: {
+        monthStart: ins.monthStart,
+        prevMonthStart: ins.prevMonthStart,
+        summary: ins.summary,
+        overspendTop3: ins.overspendTop3,
+        savingsTop3: ins.savingsTop3,
+        fixedCost: ins.fixedCost,
+        meta: {
+          currency,
+          generated_at: new Date().toISOString(),
+          duration_ms: Date.now() - started
+        }
+      }
+    };
+  } catch (err) {
+    return makeErrResult_(err, traceId, started);
+  }
+}

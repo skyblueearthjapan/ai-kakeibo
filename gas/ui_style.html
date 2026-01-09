@@ -470,4 +470,138 @@
   .legend-value {
     font-weight: 600;
   }
+
+  /* ========== Phase 5: インサイト ========== */
+
+  /* 前月比セクション */
+  .mom-section {
+    text-align: center;
+  }
+
+  .mom-main {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .mom-delta {
+    font-size: 24px;
+    font-weight: 700;
+  }
+
+  .mom-delta.positive {
+    color: #DC2626;
+  }
+
+  .mom-delta.negative {
+    color: #059669;
+  }
+
+  .mom-pct {
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  .mom-detail {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* インサイトリスト */
+  .insight-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .insight-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 8px;
+  }
+
+  .insight-cat {
+    font-weight: 600;
+  }
+
+  .insight-delta {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .insight-delta.overspend {
+    color: #DC2626;
+  }
+
+  .insight-delta.savings {
+    color: #059669;
+  }
+
+  .insight-pct {
+    font-size: 12px;
+    color: var(--muted);
+    margin-left: 4px;
+  }
+
+  /* 固定費セクション */
+  .fixed-cost-section {
+    text-align: center;
+  }
+
+  .fixed-ratio {
+    margin-bottom: 12px;
+  }
+
+  .fixed-ratio-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: #6366F1;
+  }
+
+  .fixed-ratio-label {
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .fixed-breakdown {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+  }
+
+  .fixed-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 12px;
+    font-size: 12px;
+  }
+
+  .fixed-item-cat {
+    color: var(--muted);
+  }
+
+  .fixed-item-amt {
+    font-weight: 600;
+  }
+
+  /* pastel-pink, pastel-coral追加 */
+  .pastel-pink {
+    background: linear-gradient(135deg, #FECDD3 0%, #FEE2E2 100%);
+  }
+
+  .pastel-coral {
+    background: linear-gradient(135deg, #FED7AA 0%, #FFEDD5 100%);
+  }
 </style>
