@@ -877,17 +877,17 @@
   }
 
   /**
-   * 履歴サマリーを更新（合計金額・件数・タイトル）
-   * 重要: 支出と収入を分けて集計（収入を支出に混ぜない）
+   * 履歴サマリーを更新（支出・収入・件数）
+   * 重要: 支出と収入を分けて集計（混ぜない）
    */
   function updateHistorySummary_(transactions, filters) {
     const txns = transactions || [];
 
     // 支出と収入を分けて集計（type === "expense" / "income"）
-    const expenseTotal = txns
+    const expenseSum = txns
       .filter(t => t.type === "expense")
       .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-    const incomeTotal = txns
+    const incomeSum = txns
       .filter(t => t.type === "income")
       .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
@@ -899,18 +899,22 @@
 
     const sumTitle = $("sumTitle");
     const sumSub = $("sumSub");
-    const sumAmount = $("sumAmount");
+    const sumExpense = $("sumExpense");
+    const sumIncome = $("sumIncome");
     const sumCount = $("sumCount");
 
     if (sumTitle) sumTitle.textContent = labels.title;
     if (sumSub) sumSub.textContent = labels.sub || "";
 
-    // 支出のみを表示（収入は含めない）
-    if (sumAmount) sumAmount.textContent = `支出 ¥${expenseTotal.toLocaleString()}`;
+    // 支出合計（赤系表示）
+    if (sumExpense) sumExpense.textContent = `¥${expenseSum.toLocaleString()}`;
 
-    // 件数は全件表示（収入があれば内訳も表示）
+    // 収入合計（緑系表示）
+    if (sumIncome) sumIncome.textContent = `¥${incomeSum.toLocaleString()}`;
+
+    // 件数（内訳付き）
     if (sumCount) {
-      if (incomeCount > 0) {
+      if (incomeCount > 0 || expenseCount !== totalCount) {
         sumCount.textContent = `${totalCount}件（支出${expenseCount}件・収入${incomeCount}件）`;
       } else {
         sumCount.textContent = `${totalCount}件`;
