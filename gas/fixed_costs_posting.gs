@@ -328,3 +328,102 @@ function runFixedCostPostingForMonth(year, month) {
 
   Logger.log("[" + traceId + "] 完了: " + postedCount + "件起票");
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// 遅延起票（ダッシュボード表示時に呼び出す）
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 指定月の固定費が起票済みかを確認し、未起票なら起票する（遅延起票）
+ * ダッシュボード/インサイト取得時に呼び出す
+ * @param {string} monthStartISO - YYYY-MM-01形式
+ * @returns {Object} { posted: number, skipped: number }
+ */
+function ensureFixedCostsPostedForMonth_(monthStartISO) {
+  const traceId = "FIXED-ENSURE-" + Date.now();
+
+  // 月を解析
+  const match = String(monthStartISO).match(/^(\d{4})-(\d{2})/);
+  if (!match) {
+    return { posted: 0, skipped: 0 };
+  }
+
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const ym = year + "-" + String(month).padStart(2, "0");
+  const postingDate = ym + "-01";
+
+  // 当月または過去月のみ起票（未来月は起票しない）
+  const now = new Date();
+  const targetDate = new Date(year, month - 1, 1);
+  if (targetDate > now) {
+    return { posted: 0, skipped: 0, reason: "future_month" };
+  }
+
+  // CacheServiceで重複実行を防止（同月の起票チェックは1時間に1回）
+  const cache = CacheService.getScriptCache();
+  const cacheKey = "fixed_costs_posted_" + ym;
+  const cached = cache.get(cacheKey);
+  if (cached === "done") {
+    return { posted: 0, skipped: 0, reason: "already_checked" };
+  }
+
+  // 固定費を取得
+  const fixedCosts = listActiveFixedCosts_(traceId);
+  if (fixedCosts.length === 0) {
+    cache.put(cacheKey, "done", 3600); // 1時間キャッシュ
+    return { posted: 0, skipped: 0, reason: "no_fixed_costs" };
+  }
+
+  // 起票済みキーを収集
+  const postedKeys = collectPostedFixedKeysForMonth_(ym, traceId);
+
+  // 未起票の固定費を起票
+  const txSheet = getSs_().getSheetByName("04_Transactions");
+  if (!txSheet) {
+    return { posted: 0, skipped: 0, reason: "no_transaction_sheet" };
+  }
+
+  let postedCount = 0;
+  let skippedCount = 0;
+
+  fixedCosts.forEach(function(fc) {
+    const dedupKey = makeFixedDedupKey_(fc.id, ym);
+
+    if (postedKeys.has(dedupKey)) {
+      skippedCount++;
+      return;
+    }
+
+    const txId = Utilities.getUuid();
+    const timestamp = new Date().toISOString();
+
+    const row = [
+      txId, postingDate, "expense", fc.amount, fc.name,
+      fc.category || "", fc.payment || "", dedupKey,
+      "", "", "", timestamp, timestamp
+    ];
+
+    txSheet.appendRow(row);
+    postedCount++;
+  });
+
+  // キャッシュに記録
+  cache.put(cacheKey, "done", 3600);
+
+  if (postedCount > 0) {
+    Logger.log("[" + traceId + "] 遅延起票完了: " + ym + " 起票=" + postedCount + "件");
+  }
+
+  return { posted: postedCount, skipped: skippedCount };
+}
+
+/**
+ * 取引が固定費起票かどうかを判定
+ * @param {Object} txn - 取引オブジェクト（memoフィールドを持つ）
+ * @returns {boolean} 固定費起票ならtrue
+ */
+function isFixedCostTransaction_(txn) {
+  const memo = String(txn.memo || "");
+  return memo.indexOf("FIXED:") === 0;
+}

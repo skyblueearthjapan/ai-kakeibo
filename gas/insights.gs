@@ -40,18 +40,23 @@ function buildInsights_(txns, monthStartISO, opts) {
     delta_pct: deltaPct
   };
 
-  // category maps for expense
+  // category maps for expense（全支出：サマリー・固定費計算用）
   const thisCat = sumExpenseByCategory_(thisTxns);
   const prevCat = sumExpenseByCategory_(prevTxns);
 
-  const diffList = buildCategoryDiff_(thisCat, prevCat);
+  // 変動費のみのカテゴリマップ（Top3用：固定費を除外）
+  const thisCatVariable = sumExpenseByCategory_(thisTxns, true);
+  const prevCatVariable = sumExpenseByCategory_(prevTxns, true);
 
-  const overspendTop3 = diffList
+  // Top3は変動費のみで計算
+  const diffListVariable = buildCategoryDiff_(thisCatVariable, prevCatVariable);
+
+  const overspendTop3 = diffListVariable
     .filter(x => x.delta > 0)
     .sort((a, b) => b.delta - a.delta)
     .slice(0, 3);
 
-  const savingsTop3 = diffList
+  const savingsTop3 = diffListVariable
     .filter(x => x.delta < 0)
     .sort((a, b) => a.delta - b.delta) // more negative first
     .slice(0, 3);
@@ -89,11 +94,17 @@ function sumByType_(txns, type) {
   return s;
 }
 
-/** expense by category map */
-function sumExpenseByCategory_(txns) {
+/**
+ * expense by category map
+ * @param {Object[]} txns Transaction array
+ * @param {boolean=} excludeFixedCosts If true, exclude fixed cost transactions (for Top3)
+ */
+function sumExpenseByCategory_(txns, excludeFixedCosts) {
   const map = {};
   for (const t of txns) {
     if (t.type !== "expense") continue;
+    // 固定費除外オプション（Top3用）
+    if (excludeFixedCosts && isFixedCostTransaction_(t)) continue;
     const cat = (t.category || "その他").trim() || "その他";
     map[cat] = (map[cat] || 0) + (Number(t.amount) || 0);
   }
