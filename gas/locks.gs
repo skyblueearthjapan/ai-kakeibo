@@ -5,12 +5,13 @@
  */
 
 /**
- * DocumentLockを取得
+ * ScriptLockを取得（WebAppでも確実に動作）
  * @param {string} traceId トレースID（ログ用）
  * @return {GoogleAppsScript.Lock.Lock} ロックオブジェクト
  */
 function acquireProcessingLock_(traceId) {
-  const lock = LockService.getDocumentLock();
+  // DocumentLock は WebApp で失敗することがあるため ScriptLock を使用
+  const lock = LockService.getScriptLock();
   lock.waitLock(15000);
   return lock;
 }
