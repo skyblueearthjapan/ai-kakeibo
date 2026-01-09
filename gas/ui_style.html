@@ -604,4 +604,85 @@
   .pastel-coral {
     background: linear-gradient(135deg, #FED7AA 0%, #FFEDD5 100%);
   }
+
+  /* ========== Phase 7: 入力フォーム ========== */
+
+  .form-group {
+    margin-bottom: 14px;
+  }
+
+  .form-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+
+  .form-input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid rgba(17, 24, 39, 0.10);
+    border-radius: 10px;
+    font-size: 16px;
+    background: #fff;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .form-input:focus {
+    outline: none;
+    border-color: #6366F1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  }
+
+  .form-input::placeholder {
+    color: #9CA3AF;
+  }
+
+  /* 金額入力を大きく表示 */
+  #formAmount {
+    font-size: 24px;
+    font-weight: 700;
+    text-align: right;
+  }
+
+  /* セレクトボックスのスタイル調整 */
+  select.form-input {
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236B7280' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 36px;
+  }
+
+  /* OCRステータス表示 */
+  #ocrStatus {
+    margin-top: 8px;
+    font-size: 13px;
+  }
+
+  #ocrStatus.success {
+    color: #059669;
+  }
+
+  #ocrStatus.error {
+    color: #DC2626;
+  }
+
+  #ocrStatus.processing {
+    color: #6366F1;
+  }
+
+  /* ボタン横並び */
+  .btn-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .btn-row .btn {
+    flex: 1;
+    margin-top: 0;
+  }
 </style>

@@ -387,14 +387,6 @@
       .updateTransaction(id, patch);
   }
 
-  // 初期化：現在月を表示
-  document.addEventListener("DOMContentLoaded", () => {
-    const d = new Date(currentMonthStart);
-    $("currentMonth").textContent = `${d.getFullYear()}-${("0" + (d.getMonth() + 1)).slice(-2)}`;
-    // 分析タブの月も初期化
-    $("analyticsMonth").textContent = `${d.getFullYear()}-${("0" + (d.getMonth() + 1)).slice(-2)}`;
-  });
-
   /* ========== Phase 4: ダッシュボード ========== */
 
   // 分析用の月（履歴タブとは独立）
@@ -733,4 +725,257 @@
       </div>
     `).join("");
   }
+
+  /* ========== Phase 7: 選択式入力フォーム ========== */
+
+  // カテゴリ・支払方法のキャッシュ
+  let categoriesCache_ = null;
+  let accountsCache_ = null;
+
+  /**
+   * 入力タブを初期化
+   */
+  function initInputTab() {
+    // 今日の日付をセット
+    $("formDate").value = getTodayISO_();
+
+    // カテゴリと支払方法を読み込み
+    loadCategories();
+    loadAccounts();
+  }
+
+  /**
+   * 今日の日付をISO形式で取得
+   */
+  function getTodayISO_() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = ("0" + (d.getMonth() + 1)).slice(-2);
+    const day = ("0" + d.getDate()).slice(-2);
+    return `${y}-${m}-${day}`;
+  }
+
+  /**
+   * カテゴリを読み込み
+   */
+  function loadCategories() {
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (res && res.ok && res.result && res.result.categories) {
+          categoriesCache_ = res.result.categories;
+          populateCategorySelect(res.result.categories);
+        }
+      })
+      .withFailureHandler((e) => {
+        console.error("Failed to load categories:", e);
+      })
+      .getCategories();
+  }
+
+  /**
+   * カテゴリselectを構築
+   */
+  function populateCategorySelect(categories) {
+    const select = $("formCategory");
+    select.innerHTML = '<option value="">選択してください</option>';
+
+    categories.forEach(cat => {
+      const opt = document.createElement("option");
+      opt.value = cat;
+      opt.textContent = cat;
+      select.appendChild(opt);
+    });
+  }
+
+  /**
+   * 支払方法を読み込み
+   */
+  function loadAccounts() {
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (res && res.ok && res.result && res.result.accounts) {
+          accountsCache_ = res.result.accounts;
+          populateAccountSelect(res.result.accounts);
+        }
+      })
+      .withFailureHandler((e) => {
+        console.error("Failed to load accounts:", e);
+      })
+      .getAccounts();
+  }
+
+  /**
+   * 支払方法selectを構築
+   */
+  function populateAccountSelect(accounts) {
+    const select = $("formPayment");
+    select.innerHTML = '<option value="">選択してください</option>';
+
+    accounts.forEach(acc => {
+      const opt = document.createElement("option");
+      opt.value = acc;
+      opt.textContent = acc;
+      select.appendChild(opt);
+    });
+  }
+
+  /**
+   * レシートをOCRスキャン
+   */
+  async function scanReceipt() {
+    const file = $("receiptV2").files[0];
+    if (!file) {
+      setOcrStatus("画像を選んでください", "error");
+      return;
+    }
+
+    $("btnOcr").disabled = true;
+    setOcrStatus("画像準備中...", "processing");
+
+    try {
+      const dataUrl = await resizeImageToDataUrl_(file, 1280, 0.72);
+      setOcrStatus("OCR解析中...", "processing");
+
+      google.script.run
+        .withSuccessHandler((res) => {
+          $("btnOcr").disabled = false;
+
+          if (!res || !res.ok) {
+            setOcrStatus(res?.error?.user_message || "OCR処理に失敗しました", "error");
+            return;
+          }
+
+          const draft = res.result.draft;
+          populateFormFromDraft(draft);
+          setOcrStatus("読み取り完了！内容を確認してください", "success");
+        })
+        .withFailureHandler((e) => {
+          $("btnOcr").disabled = false;
+          setOcrStatus("エラー: " + (e?.message || String(e)), "error");
+        })
+        .processReceiptV2(dataUrl, clientContext_());
+
+    } catch (err) {
+      $("btnOcr").disabled = false;
+      setOcrStatus("画像処理に失敗しました: " + err, "error");
+    }
+  }
+
+  /**
+   * OCRステータス表示
+   */
+  function setOcrStatus(msg, type) {
+    const el = $("ocrStatus");
+    el.textContent = msg;
+    el.className = "hint " + (type || "");
+  }
+
+  /**
+   * ドラフトからフォームに反映
+   */
+  function populateFormFromDraft(draft) {
+    if (!draft) return;
+
+    if (draft.date) {
+      $("formDate").value = draft.date;
+    }
+    if (draft.amount) {
+      $("formAmount").value = draft.amount;
+    }
+    if (draft.merchant) {
+      $("formMerchant").value = draft.merchant;
+    }
+    if (draft.category) {
+      $("formCategory").value = draft.category;
+    }
+    if (draft.payment_method) {
+      $("formPayment").value = draft.payment_method;
+    }
+    if (draft.memo) {
+      $("formMemo").value = draft.memo;
+    }
+  }
+
+  /**
+   * フォームをクリア
+   */
+  function clearForm() {
+    $("formDate").value = getTodayISO_();
+    $("formAmount").value = "";
+    $("formMerchant").value = "";
+    $("formCategory").value = "";
+    $("formPayment").value = "";
+    $("formMemo").value = "";
+    $("receiptV2").value = "";
+    setOcrStatus("", "");
+    setFormStatus("入力してください");
+  }
+
+  /**
+   * フォームステータス表示
+   */
+  function setFormStatus(msg) {
+    $("formStatus").textContent = msg;
+  }
+
+  /**
+   * ドラフトを保存
+   */
+  function saveDraft() {
+    const amount = Number($("formAmount").value);
+    if (!amount || amount <= 0) {
+      setFormStatus("金額を入力してください");
+      return;
+    }
+
+    const draft = {
+      date: $("formDate").value || getTodayISO_(),
+      amount: amount,
+      merchant: $("formMerchant").value,
+      category: $("formCategory").value,
+      subcategory: "",
+      payment_method: $("formPayment").value,
+      memo: $("formMemo").value,
+      raw_text: "",
+      confidence: 0
+    };
+
+    $("btnSaveDraft").disabled = true;
+    setFormStatus("保存中...");
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        $("btnSaveDraft").disabled = false;
+
+        if (!res || !res.ok) {
+          setFormStatus("保存失敗: " + (res?.error?.user_message || "エラー"));
+          return;
+        }
+
+        const t = res.result.transaction;
+        setFormStatus(`保存しました (ID: ${t.id})`);
+
+        // フォームをクリア
+        setTimeout(() => {
+          clearForm();
+        }, 1500);
+      })
+      .withFailureHandler((e) => {
+        $("btnSaveDraft").disabled = false;
+        setFormStatus("エラー: " + (e?.message || String(e)));
+      })
+      .saveTransactionDraft(draft, clientContext_());
+  }
+
+  // DOMContentLoaded に入力タブ初期化を追加
+  const originalDOMContentLoaded = document.addEventListener;
+  document.addEventListener("DOMContentLoaded", () => {
+    const d = new Date(currentMonthStart);
+    $("currentMonth").textContent = `${d.getFullYear()}-${("0" + (d.getMonth() + 1)).slice(-2)}`;
+    // 分析タブの月も初期化
+    $("analyticsMonth").textContent = `${d.getFullYear()}-${("0" + (d.getMonth() + 1)).slice(-2)}`;
+
+    // Phase 7: 入力タブを初期化
+    initInputTab();
+  });
 </script>

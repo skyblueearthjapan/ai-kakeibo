@@ -16,6 +16,7 @@
   <!-- タブナビゲーション -->
   <nav class="tabs">
     <button class="tab active" data-tab="home" onclick="switchTab('home')">ホーム</button>
+    <button class="tab" data-tab="input" onclick="switchTab('input')">入力</button>
     <button class="tab" data-tab="history" onclick="switchTab('history')">履歴</button>
     <button class="tab" data-tab="analytics" onclick="switchTab('analytics')">分析</button>
   </nav>
@@ -42,6 +43,58 @@
     <section class="card pastel-blue">
       <h3>結果</h3>
       <pre id="status" class="status">待機中...</pre>
+    </section>
+  </main>
+
+  <!-- Phase7: 入力タブ（選択式フォーム） -->
+  <main id="tab-input" class="wrap tab-content">
+    <!-- レシートOCR -->
+    <section class="card pastel-mint">
+      <h3>レシートから入力</h3>
+      <input id="receiptV2" type="file" accept="image/*" capture="environment" />
+      <button id="btnOcr" class="btn secondary" onclick="scanReceipt()">レシートを読み取る</button>
+      <div id="ocrStatus" class="hint"></div>
+    </section>
+
+    <!-- 入力フォーム -->
+    <section class="card pastel-lav">
+      <h3>取引を入力</h3>
+      <div class="form-group">
+        <label for="formDate">日付</label>
+        <input type="date" id="formDate" class="form-input">
+      </div>
+      <div class="form-group">
+        <label for="formAmount">金額</label>
+        <input type="number" id="formAmount" class="form-input" placeholder="0" min="0">
+      </div>
+      <div class="form-group">
+        <label for="formMerchant">店名・内容</label>
+        <input type="text" id="formMerchant" class="form-input" placeholder="店名や支払先">
+      </div>
+      <div class="form-group">
+        <label for="formCategory">カテゴリ</label>
+        <select id="formCategory" class="form-input">
+          <option value="">選択してください</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="formPayment">支払方法</label>
+        <select id="formPayment" class="form-input">
+          <option value="">選択してください</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="formMemo">メモ</label>
+        <input type="text" id="formMemo" class="form-input" placeholder="任意">
+      </div>
+      <button id="btnSaveDraft" class="btn primary" onclick="saveDraft()">確定して保存</button>
+      <button class="btn secondary" onclick="clearForm()">クリア</button>
+    </section>
+
+    <!-- 保存結果 -->
+    <section class="card pastel-blue">
+      <h3>結果</h3>
+      <pre id="formStatus" class="status">入力してください</pre>
     </section>
   </main>
 

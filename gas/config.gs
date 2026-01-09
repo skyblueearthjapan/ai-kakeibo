@@ -13,7 +13,12 @@ const DEFAULT_CONFIG = {
   INCLUDE_UNCONFIRMED_IN_DASHBOARD: false,
   CURRENCY: "JPY",
   OPENAI_TIMEOUT_MS: 30000,
-  OPENAI_MAX_RETRIES: 2
+  OPENAI_MAX_RETRIES: 2,
+  // Phase7: AI/OCRモード設定
+  AI_ENABLED: false,      // OpenAI自動解析OFF（デフォルト）
+  OCR_ENABLED: true,      // OCR処理ON（デフォルト）
+  OCR_PROVIDER: "vision", // vision or drive
+  VISION_API_KEY: ""      // Vision OCR用APIキー
 };
 
 // 設定キャッシュ（リクエスト内で再利用）
@@ -148,3 +153,75 @@ function getOpenAIMaxRetries_() {
 function clearConfigCache_() {
   configCache_ = null;
 }
+
+/** ========== Phase 7: AI/OCRモード設定 ========== */
+
+/**
+ * AIが有効かどうか
+ * @return {boolean}
+ */
+function isAiEnabled_() {
+  const cfg = loadConfig_();
+  return !!cfg.AI_ENABLED;
+}
+
+/**
+ * OCRが有効かどうか
+ * @return {boolean}
+ */
+function isOcrEnabled_() {
+  const cfg = loadConfig_();
+  return cfg.OCR_ENABLED !== false; // デフォルトtrue
+}
+
+/**
+ * OCRプロバイダー取得
+ * @return {string} "vision" or "drive"
+ */
+function getOcrProvider_() {
+  const cfg = loadConfig_();
+  return cfg.OCR_PROVIDER || "vision";
+}
+
+/**
+ * Vision API Key取得
+ * @return {string}
+ */
+function getVisionApiKey_() {
+  const cfg = loadConfig_();
+  if (cfg.VISION_API_KEY) return cfg.VISION_API_KEY;
+  // Script Propertiesからも取得を試みる
+  try {
+    return PropertiesService.getScriptProperties().getProperty("VISION_API_KEY") || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+/**
+ * OpenAI APIキーが設定されているか（エラーを投げずにチェック）
+ * @return {boolean}
+ */
+function hasOpenAiApiKey_() {
+  try {
+    const key = PropertiesService.getScriptProperties().getProperty("OPENAI_API_KEY");
+    return !!key && key.trim().length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * 現在の処理モードを判定
+ * @return {string} "ai" | "ocr" | "manual"
+ */
+function getProcessingMode_() {
+  if (isAiEnabled_() && hasOpenAiApiKey_()) {
+    return "ai";
+  }
+  if (isOcrEnabled_()) {
+    return "ocr";
+  }
+  return "manual";
+}
+

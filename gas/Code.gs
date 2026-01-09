@@ -542,3 +542,272 @@ function getInsights(monthStart, opts) {
     return makeErrResult_(err, traceId, started);
   }
 }
+
+/** ========== Phase 7: AI非依存 OCR + 選択式入力 ========== */
+
+/**
+ * UI -> GAS: レシート画像をOCR解析（保存しない、draftのみ返す）
+ * @param {string} dataUrl data:image/...;base64,...
+ * @param {Object=} clientContext { client_request_id }
+ * @return {Object} { ok, result: { draft } }
+ */
+function processReceiptV2(dataUrl, clientContext) {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    if (!dataUrl || String(dataUrl).trim() === "") {
+      throw makeAppError_("E_BAD_REQUEST", "dataUrl is empty", traceId, false, "画像が見つかりません。もう一度撮影してください。");
+    }
+
+    const parsed = parseDataUrl_(String(dataUrl), traceId);
+    const imageSize = Math.round(parsed.base64.length * 0.75);
+
+    // Drive保存
+    let receiptFileId = "";
+    try {
+      receiptFileId = saveReceiptToDrive_(parsed.base64, parsed.mimeType);
+    } catch (e) {
+      console.warn(`[${traceId}] Drive save failed: ${e}`);
+    }
+
+    // 処理モード判定
+    const mode = getProcessingMode_();
+    let draft = createEmptyDraft_();
+
+    if (mode === "ocr") {
+      // OCRモード
+      const ocr = runOcr_(parsed.base64, parsed.mimeType, traceId);
+      draft = buildDraftFromOcrText_(ocr.fullText);
+      draft.source = "ocr";
+    } else if (mode === "manual") {
+      // 手入力モード（OCRなし）
+      draft.source = "manual";
+    }
+    // mode === "ai" の場合は将来拡張（現時点ではOCRにフォールバック）
+
+    draft.receipt_file_id = receiptFileId;
+
+    logSuccess_(traceId, "processReceiptV2", Date.now() - started, {
+      input_size: imageSize,
+      mode: mode
+    });
+
+    return {
+      ok: true,
+      result: { draft }
+    };
+
+  } catch (err) {
+    logError_(traceId, "processReceiptV2", Date.now() - started, normalizeError_(err, traceId).code, String(err), {});
+    return makeErrResult_(err, traceId, started);
+  }
+}
+
+/**
+ * UI -> GAS: 手入力用の空Draftを取得
+ * @return {Object} { ok, result: { draft } }
+ */
+function getEmptyDraft() {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    const draft = createEmptyDraft_();
+    draft.source = "manual";
+
+    logSuccess_(traceId, "getEmptyDraft", Date.now() - started, {});
+
+    return {
+      ok: true,
+      result: { draft }
+    };
+  } catch (err) {
+    return makeErrResult_(err, traceId, started);
+  }
+}
+
+/**
+ * UI -> GAS: Draft確定保存
+ * @param {Object} draft TransactionDraft
+ * @param {Object=} clientContext { client_request_id }
+ * @return {Object} { ok, result: { transaction_id } }
+ */
+function saveTransactionDraft(draft, clientContext) {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+  const clientRequestId = clientContext?.client_request_id || null;
+
+  try {
+    // 二重送信チェック
+    if (clientRequestId) {
+      const dup = checkDuplicate_(clientRequestId);
+      if (dup) {
+        logSuccess_(traceId, "saveTransactionDraft", Date.now() - started, { txn_id: dup.result?.transaction_id });
+        return dup;
+      }
+
+      if (!tryAcquireProcessingLock_(clientRequestId)) {
+        throw makeAppError_("E_DUPLICATE_REQUEST", "Request already in progress", traceId, false, "処理中です。しばらくお待ちください。");
+      }
+    }
+
+    // バリデーション
+    if (!draft) {
+      throw makeAppError_("E_BAD_REQUEST", "Draft is required", traceId, false, "入力データがありません。");
+    }
+
+    if (!draft.amount || Number(draft.amount) <= 0) {
+      throw makeAppError_("E_BAD_REQUEST", "Invalid amount", traceId, false, "金額が正しく入力されていません。");
+    }
+
+    // 行データ作成
+    const row = {
+      id: generateTransactionId_(),
+      date: draft.date || "",
+      type: draft.type || "expense",
+      account: draft.account || "",
+      merchant: draft.merchant || "",
+      item: draft.item || "",
+      category: draft.category || "",
+      subcategory: draft.subcategory || "",
+      payment_method: draft.payment_method || "",
+      amount: Number(draft.amount),
+      memo: draft.memo || "",
+      tags: draft.tags || "",
+      source: draft.source || "manual",
+      confidence: 0,
+      receipt_file_id: draft.receipt_file_id || "",
+      raw_text: draft.raw_text || "",
+      status: "confirmed", // Phase7: ユーザー確定なので即confirmed
+      trace_id: traceId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    // シートに保存
+    const txnId = appendTransactionRow_(row, traceId);
+
+    const result = {
+      ok: true,
+      result: {
+        transaction_id: txnId,
+        transaction: row
+      }
+    };
+
+    logSuccess_(traceId, "saveTransactionDraft", Date.now() - started, { txn_id: txnId });
+
+    if (clientRequestId) {
+      markAsProcessed_(clientRequestId, txnId, result);
+      releaseProcessingLock_(clientRequestId);
+    }
+
+    return result;
+
+  } catch (err) {
+    logError_(traceId, "saveTransactionDraft", Date.now() - started, normalizeError_(err, traceId).code, String(err), {});
+
+    if (clientRequestId) {
+      releaseProcessingLock_(clientRequestId);
+    }
+
+    return makeErrResult_(err, traceId, started);
+  }
+}
+
+/**
+ * カテゴリ一覧を取得（UIのselect用）
+ * @return {Object} { ok, result: { categories } }
+ */
+function getCategories() {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("02_Categories");
+    let categories = [];
+
+    if (sheet) {
+      const values = sheet.getDataRange().getValues();
+      for (let r = 1; r < values.length; r++) {
+        const cat = String(values[r][0] || "").trim();
+        const subcat = String(values[r][1] || "").trim();
+        if (cat) {
+          categories.push({ category: cat, subcategory: subcat });
+        }
+      }
+    }
+
+    // デフォルトカテゴリ（シートが空の場合）
+    if (categories.length === 0) {
+      categories = [
+        { category: "食費", subcategory: "" },
+        { category: "日用品", subcategory: "" },
+        { category: "交通", subcategory: "" },
+        { category: "住居", subcategory: "" },
+        { category: "光熱費", subcategory: "" },
+        { category: "通信", subcategory: "" },
+        { category: "医療", subcategory: "" },
+        { category: "娯楽", subcategory: "" },
+        { category: "交際", subcategory: "" },
+        { category: "その他", subcategory: "" }
+      ];
+    }
+
+    logSuccess_(traceId, "getCategories", Date.now() - started, {});
+
+    return {
+      ok: true,
+      result: { categories }
+    };
+
+  } catch (err) {
+    return makeErrResult_(err, traceId, started);
+  }
+}
+
+/**
+ * 支払方法一覧を取得（UIのselect用）
+ * @return {Object} { ok, result: { accounts } }
+ */
+function getAccounts() {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("03_Accounts");
+    let accounts = [];
+
+    if (sheet) {
+      const values = sheet.getDataRange().getValues();
+      for (let r = 1; r < values.length; r++) {
+        const name = String(values[r][0] || "").trim();
+        const type = String(values[r][1] || "").trim();
+        if (name) {
+          accounts.push({ name: name, type: type });
+        }
+      }
+    }
+
+    // デフォルト支払方法
+    if (accounts.length === 0) {
+      accounts = [
+        { name: "現金", type: "cash" },
+        { name: "クレジットカード", type: "credit" },
+        { name: "電子マネー", type: "emoney" },
+        { name: "銀行振込", type: "bank" }
+      ];
+    }
+
+    logSuccess_(traceId, "getAccounts", Date.now() - started, {});
+
+    return {
+      ok: true,
+      result: { accounts }
+    };
+
+  } catch (err) {
+    return makeErrResult_(err, traceId, started);
+  }
+}
