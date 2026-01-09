@@ -113,11 +113,6 @@ function runMonthlyFixedCostPosting_() {
     Logger.log("[" + traceId + "] 今月起票済み: " + postedKeys.size + "件");
 
     // 3. 未起票の固定費を起票
-    const txSheet = getSs_().getSheetByName("04_Transactions");
-    if (!txSheet) {
-      throw new Error("04_Transactions シートが見つかりません");
-    }
-
     let postedCount = 0;
     let skippedCount = 0;
 
@@ -130,29 +125,25 @@ function runMonthlyFixedCostPosting_() {
         return;
       }
 
-      // 新規トランザクションを追加
-      const txId = Utilities.getUuid();
+      // 新規トランザクションを追加（ヘッダー駆動）
       const timestamp = new Date().toISOString();
 
-      // 04_Transactions のカラム順序に合わせる
-      // id | date | type | amount | merchant | category | payment | memo | receipt | lat | lng | created_at | updated_at
-      const row = [
-        txId,                           // id
-        postingDate,                    // date (当月1日)
-        "expense",                      // type
-        fc.amount,                      // amount
-        fc.name,                        // merchant (固定費名を店舗名として使用)
-        fc.category || "",              // category
-        fc.payment || "",               // payment
-        dedupKey,                       // memo (重複防止キー)
-        "",                             // receipt
-        "",                             // lat
-        "",                             // lng
-        timestamp,                      // created_at
-        timestamp                       // updated_at
-      ];
+      const rowObj = {
+        id: Utilities.getUuid(),
+        date: postingDate,
+        type: "expense",
+        amount: fc.amount,
+        merchant: fc.name,
+        category: fc.category || "",
+        payment_method: fc.payment || "",
+        memo: dedupKey,
+        source: "fixed_cost",
+        status: "confirmed",
+        created_at: timestamp,
+        updated_at: timestamp
+      };
 
-      txSheet.appendRow(row);
+      appendTransactionRow_(rowObj, traceId);
       Logger.log("[" + traceId + "] 起票: " + fc.name + " ¥" + fc.amount + " [" + dedupKey + "]");
       postedCount++;
     });
@@ -298,11 +289,6 @@ function runFixedCostPostingForMonth(year, month) {
   const postedKeys = collectPostedFixedKeysForMonth_(ym, traceId);
 
   // 3. 未起票の固定費を起票
-  const txSheet = getSs_().getSheetByName("04_Transactions");
-  if (!txSheet) {
-    throw new Error("04_Transactions シートが見つかりません");
-  }
-
   let postedCount = 0;
 
   fixedCosts.forEach(function(fc) {
@@ -313,16 +299,24 @@ function runFixedCostPostingForMonth(year, month) {
       return;
     }
 
-    const txId = Utilities.getUuid();
     const timestamp = new Date().toISOString();
 
-    const row = [
-      txId, postingDate, "expense", fc.amount, fc.name,
-      fc.category || "", fc.payment || "", dedupKey,
-      "", "", "", timestamp, timestamp
-    ];
+    const rowObj = {
+      id: Utilities.getUuid(),
+      date: postingDate,
+      type: "expense",
+      amount: fc.amount,
+      merchant: fc.name,
+      category: fc.category || "",
+      payment_method: fc.payment || "",
+      memo: dedupKey,
+      source: "fixed_cost",
+      status: "confirmed",
+      created_at: timestamp,
+      updated_at: timestamp
+    };
 
-    txSheet.appendRow(row);
+    appendTransactionRow_(rowObj, traceId);
     postedCount++;
   });
 
@@ -379,11 +373,6 @@ function ensureFixedCostsPostedForMonth_(monthStartISO) {
   const postedKeys = collectPostedFixedKeysForMonth_(ym, traceId);
 
   // 未起票の固定費を起票
-  const txSheet = getSs_().getSheetByName("04_Transactions");
-  if (!txSheet) {
-    return { posted: 0, skipped: 0, reason: "no_transaction_sheet" };
-  }
-
   let postedCount = 0;
   let skippedCount = 0;
 
@@ -395,16 +384,25 @@ function ensureFixedCostsPostedForMonth_(monthStartISO) {
       return;
     }
 
-    const txId = Utilities.getUuid();
     const timestamp = new Date().toISOString();
 
-    const row = [
-      txId, postingDate, "expense", fc.amount, fc.name,
-      fc.category || "", fc.payment || "", dedupKey,
-      "", "", "", timestamp, timestamp
-    ];
+    // ヘッダー駆動 appendTransactionRow_ 用のオブジェクト形式
+    const rowObj = {
+      id: Utilities.getUuid(),
+      date: postingDate,
+      type: "expense",
+      amount: fc.amount,
+      merchant: fc.name,
+      category: fc.category || "",
+      payment_method: fc.payment || "",
+      memo: dedupKey,
+      source: "fixed_cost",
+      status: "confirmed",
+      created_at: timestamp,
+      updated_at: timestamp
+    };
 
-    txSheet.appendRow(row);
+    appendTransactionRow_(rowObj, traceId);
     postedCount++;
   });
 
