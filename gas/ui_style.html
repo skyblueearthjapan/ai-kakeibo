@@ -1,0 +1,138 @@
+<style>
+  :root {
+    --bg: #F8FAFC;
+    --text: #111827;
+    --muted: #6B7280;
+    --card: #FFFFFF;
+
+    --blue: #DCEBFF;
+    --pink: #FFE3EE;
+    --mint: #DFF7EE;
+    --lav: #EEE6FF;
+    --yellow: #FFF6D8;
+
+    --radius: 16px;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
+    line-height: 1.5;
+  }
+
+  .top {
+    padding: 16px 16px 10px;
+  }
+
+  .title {
+    font-size: 20px;
+    font-weight: 800;
+  }
+
+  .subtitle {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  .wrap {
+    padding: 0 16px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 14px;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(17, 24, 39, 0.06);
+  }
+
+  .pastel-blue {
+    background: linear-gradient(0deg, #fff, var(--blue));
+  }
+
+  .pastel-mint {
+    background: linear-gradient(0deg, #fff, var(--mint));
+  }
+
+  .pastel-lav {
+    background: linear-gradient(0deg, #fff, var(--lav));
+  }
+
+  .pastel-pink {
+    background: linear-gradient(0deg, #fff, var(--pink));
+  }
+
+  h3 {
+    margin: 0 0 10px;
+    font-size: 16px;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 90px;
+    resize: vertical;
+    border-radius: 12px;
+    border: 1px solid rgba(17, 24, 39, 0.10);
+    padding: 12px;
+    font-size: 16px;
+    outline: none;
+    background: #fff;
+  }
+
+  input[type="file"] {
+    width: 100%;
+    padding: 10px;
+    border-radius: 12px;
+    border: 1px dashed rgba(17, 24, 39, 0.20);
+    background: #fff;
+  }
+
+  .hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .btn {
+    width: 100%;
+    margin-top: 12px;
+    height: 46px;
+    border: none;
+    border-radius: 14px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .primary {
+    background: #111827;
+    color: #fff;
+  }
+
+  .primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .primary:active:not(:disabled) {
+    opacity: 0.8;
+  }
+
+  .status {
+    margin: 0;
+    white-space: pre-wrap;
+    font-size: 13px;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+</style>

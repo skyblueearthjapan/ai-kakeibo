@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>家計簿受付</title>
+  <?!= include('ui_style'); ?>
+</head>
+<body>
+  <header class="top">
+    <div class="title">家計簿受付</div>
+    <div class="subtitle">かんたん入力・レシート撮影</div>
+  </header>
+
+  <main class="wrap">
+    <!-- テキスト入力カード -->
+    <section class="card pastel-lav">
+      <h3>かんたん入力</h3>
+      <textarea id="text" placeholder="例：昨日 スタバ 620円 ラテ / 交通費 180円 / 食材 2300円"></textarea>
+      <div class="hint">※音声入力はキーボードのマイクでこの欄に話して入力できます</div>
+      <button id="btnText" class="btn primary" onclick="sendText()">送信</button>
+    </section>
+
+    <!-- レシート撮影カード -->
+    <section class="card pastel-mint">
+      <h3>レシート撮影</h3>
+      <input id="receipt" type="file" accept="image/*" capture="environment" />
+      <div class="hint">※レシート全体（店名/日付/合計）が写るように撮影</div>
+      <button id="btnReceipt" class="btn primary" onclick="sendReceipt()">レシートを送信</button>
+    </section>
+
+    <!-- 結果表示カード -->
+    <section class="card pastel-blue">
+      <h3>結果</h3>
+      <pre id="status" class="status">待機中...</pre>
+    </section>
+  </main>
+
+  <?!= include('ui_app'); ?>
+</body>
+</html>
