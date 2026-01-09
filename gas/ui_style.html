@@ -1095,4 +1095,119 @@
     margin-top: 0;
     padding: 10px;
   }
+
+  /* ========== 収入入力・固定費管理 ========== */
+
+  /* KPIクリック可能 */
+  .kpi-clickable {
+    cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.1s;
+    border-radius: 12px;
+  }
+
+  .kpi-clickable:hover {
+    transform: scale(1.02);
+  }
+
+  .kpi-clickable:active {
+    transform: scale(0.98);
+  }
+
+  .kpi-add-hint {
+    font-size: 10px;
+    font-weight: 600;
+    color: #059669;
+    margin-left: 4px;
+  }
+
+  /* 固定費一覧 */
+  .fixed-cost-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 12px 0;
+  }
+
+  .fixed-cost-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.7);
+    border-radius: 10px;
+    border: 1px solid rgba(17, 24, 39, 0.06);
+  }
+
+  .fixed-cost-info {
+    flex: 1;
+  }
+
+  .fixed-cost-name {
+    font-weight: 700;
+    font-size: 14px;
+  }
+
+  .fixed-cost-meta {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .fixed-cost-amount {
+    font-weight: 800;
+    font-size: 16px;
+    margin-right: 12px;
+  }
+
+  .fixed-cost-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .fixed-cost-actions button {
+    padding: 4px 10px;
+    border: none;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-edit-fixed {
+    background: var(--blue);
+    color: #1E40AF;
+  }
+
+  .btn-delete-fixed {
+    background: var(--pink);
+    color: #BE185D;
+  }
+
+  /* 固定費追加ボタン */
+  .btn-add-fixed {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    margin-top: 12px;
+    border: 2px dashed rgba(17, 24, 39, 0.15);
+    border-radius: 12px;
+    background: transparent;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+  }
+
+  .btn-add-fixed:hover {
+    border-color: #6366F1;
+    color: #6366F1;
+  }
+
+  /* 固定費フォーム */
+  #fixedCostFormSection {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(17, 24, 39, 0.08);
+  }
 </style>

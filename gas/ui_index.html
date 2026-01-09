@@ -214,8 +214,8 @@
           <div class="kpi-label">支出</div>
           <div id="kpiExpense" class="kpi-value kpi-expense">-</div>
         </div>
-        <div class="kpi-item">
-          <div class="kpi-label">収入</div>
+        <div class="kpi-item kpi-clickable" onclick="toggleIncomeForm()">
+          <div class="kpi-label">収入 <span class="kpi-add-hint">＋追加</span></div>
           <div id="kpiIncome" class="kpi-value kpi-income">-</div>
         </div>
         <div class="kpi-item">
@@ -223,6 +223,41 @@
           <div id="kpiNet" class="kpi-value">-</div>
         </div>
       </div>
+    </section>
+
+    <!-- 収入入力フォーム -->
+    <section id="incomeFormSection" class="card pastel-blue" style="display:none;">
+      <h3>収入を追加</h3>
+      <div class="form-group">
+        <label>日付</label>
+        <input type="date" id="incomeDate" class="form-input">
+      </div>
+      <div class="form-group">
+        <label>金額 *</label>
+        <input type="number" id="incomeAmount" class="form-input" placeholder="例: 300000" inputmode="numeric">
+      </div>
+      <div class="form-group">
+        <label>内容</label>
+        <input type="text" id="incomeMerchant" class="form-input" placeholder="例: 給与、ボーナス">
+      </div>
+      <div class="form-group">
+        <label>入金先</label>
+        <select id="incomeAccount" class="form-input">
+          <option value="">選択してください</option>
+          <option value="銀行">銀行</option>
+          <option value="現金">現金</option>
+          <option value="電子マネー">電子マネー</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>メモ</label>
+        <input type="text" id="incomeMemo" class="form-input" placeholder="備考">
+      </div>
+      <div class="btn-row">
+        <button class="btn secondary" onclick="toggleIncomeForm()">キャンセル</button>
+        <button id="btnSaveIncome" class="btn primary" onclick="saveIncome()">保存</button>
+      </div>
+      <div id="incomeStatus" class="hint"></div>
     </section>
 
     <!-- カテゴリ別内訳 -->
@@ -281,7 +316,51 @@
           <span id="fixedRatio" class="fixed-ratio-value">-</span>
           <span class="fixed-ratio-label">（<span id="fixedTotal">-</span>）</span>
         </div>
-        <div id="fixedBreakdown" class="fixed-breakdown"></div>
+      </div>
+      <!-- 固定費一覧 -->
+      <div id="fixedCostList" class="fixed-cost-list"></div>
+      <div id="fixedCostEmpty" class="empty-message" style="display:none;">固定費が登録されていません</div>
+      <!-- 固定費追加ボタン -->
+      <button class="btn-add-fixed" onclick="toggleFixedCostForm()">
+        <span id="fixedFormToggleIcon">＋</span> 固定費を追加
+      </button>
+      <!-- 固定費追加フォーム -->
+      <div id="fixedCostFormSection" style="display:none;">
+        <div class="form-group">
+          <label>名前 *</label>
+          <input type="text" id="fixedName" class="form-input" placeholder="例: 家賃、Netflix">
+        </div>
+        <div class="form-group">
+          <label>金額 *</label>
+          <input type="number" id="fixedAmount" class="form-input" placeholder="例: 80000" inputmode="numeric">
+        </div>
+        <div class="form-group">
+          <label>カテゴリ</label>
+          <select id="fixedCategory" class="form-input">
+            <option value="">選択してください</option>
+            <option value="住居費">住居費</option>
+            <option value="光熱費">光熱費</option>
+            <option value="通信費">通信費</option>
+            <option value="保険">保険</option>
+            <option value="サブスク">サブスク</option>
+            <option value="その他">その他</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>支払方法</label>
+          <select id="fixedPayment" class="form-input">
+            <option value="">選択してください</option>
+            <option value="銀行">銀行引落</option>
+            <option value="クレカ">クレジットカード</option>
+            <option value="現金">現金</option>
+          </select>
+        </div>
+        <input type="hidden" id="fixedEditId" value="">
+        <div class="btn-row">
+          <button class="btn secondary" onclick="cancelFixedCostForm()">キャンセル</button>
+          <button id="btnSaveFixed" class="btn primary" onclick="saveFixedCost()">保存</button>
+        </div>
+        <div id="fixedStatus" class="hint"></div>
       </div>
     </section>
   </main>

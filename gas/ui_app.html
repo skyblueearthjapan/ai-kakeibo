@@ -1046,6 +1046,7 @@
         renderCategoryChart(byCategory, currency);
         renderTrendChart(trend12m, currency);
         loadInsights();
+        loadFixedCosts();  // 固定費一覧も読み込み
       })
       .withFailureHandler((e) => {
         $("kpiLoading").style.display = "none";
@@ -1279,6 +1280,269 @@
         <span class="fixed-item-amt">${fmt(item.amount)}</span>
       </div>
     `).join("");
+  }
+
+  /* ========== 収入入力 ========== */
+
+  function toggleIncomeForm() {
+    const section = $("incomeFormSection");
+    if (!section) return;
+
+    const isHidden = section.style.display === "none";
+    section.style.display = isHidden ? "block" : "none";
+
+    if (isHidden) {
+      // 日付を今日に初期化
+      if ($("incomeDate")) $("incomeDate").value = getTodayISO_();
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
+  function saveIncome() {
+    const amount = Number($("incomeAmount")?.value);
+    if (!amount || amount <= 0) {
+      setIncomeStatus("金額を入力してください", "error");
+      return;
+    }
+
+    const draft = {
+      date: $("incomeDate")?.value || getTodayISO_(),
+      type: "income",  // 重要：収入として保存
+      amount: amount,
+      merchant: $("incomeMerchant")?.value || "",
+      item: "",
+      category: "収入",
+      account: $("incomeAccount")?.value || "",
+      payment_method: "",
+      memo: $("incomeMemo")?.value || "",
+      raw_text: "",
+      confidence: 1
+    };
+
+    const btn = $("btnSaveIncome");
+    if (btn) btn.disabled = true;
+    setIncomeStatus("保存中...", "processing");
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (btn) btn.disabled = false;
+
+        if (!res || !res.ok) {
+          setIncomeStatus("保存失敗: " + (res?.error?.user_message || "エラー"), "error");
+          return;
+        }
+
+        setIncomeStatus("保存しました！", "success");
+
+        // フォームをクリア＆閉じる
+        setTimeout(() => {
+          clearIncomeForm();
+          toggleIncomeForm();
+          // ダッシュボードを再読み込み
+          loadDashboard();
+        }, 1000);
+      })
+      .withFailureHandler((e) => {
+        if (btn) btn.disabled = false;
+        setIncomeStatus("エラー: " + (e?.message || String(e)), "error");
+      })
+      .saveTransactionDraft(draft, clientContext_());
+  }
+
+  function clearIncomeForm() {
+    if ($("incomeDate")) $("incomeDate").value = getTodayISO_();
+    if ($("incomeAmount")) $("incomeAmount").value = "";
+    if ($("incomeMerchant")) $("incomeMerchant").value = "";
+    if ($("incomeAccount")) $("incomeAccount").value = "";
+    if ($("incomeMemo")) $("incomeMemo").value = "";
+    setIncomeStatus("", "");
+  }
+
+  function setIncomeStatus(msg, type) {
+    const el = $("incomeStatus");
+    if (el) {
+      el.textContent = msg;
+      el.className = "hint " + (type || "");
+    }
+  }
+
+  /* ========== 固定費管理 ========== */
+
+  let FIXED_COSTS = [];
+
+  function toggleFixedCostForm() {
+    const section = $("fixedCostFormSection");
+    const icon = $("fixedFormToggleIcon");
+    if (!section) return;
+
+    const isHidden = section.style.display === "none";
+    section.style.display = isHidden ? "block" : "none";
+
+    if (icon) icon.textContent = isHidden ? "−" : "＋";
+
+    if (isHidden) {
+      clearFixedCostForm();
+    }
+  }
+
+  function cancelFixedCostForm() {
+    const section = $("fixedCostFormSection");
+    const icon = $("fixedFormToggleIcon");
+    if (section) section.style.display = "none";
+    if (icon) icon.textContent = "＋";
+    clearFixedCostForm();
+  }
+
+  function clearFixedCostForm() {
+    if ($("fixedName")) $("fixedName").value = "";
+    if ($("fixedAmount")) $("fixedAmount").value = "";
+    if ($("fixedCategory")) $("fixedCategory").value = "";
+    if ($("fixedPayment")) $("fixedPayment").value = "";
+    if ($("fixedEditId")) $("fixedEditId").value = "";
+    setFixedStatus("", "");
+  }
+
+  function setFixedStatus(msg, type) {
+    const el = $("fixedStatus");
+    if (el) {
+      el.textContent = msg;
+      el.className = "hint " + (type || "");
+    }
+  }
+
+  function loadFixedCosts() {
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (!res || !res.ok) {
+          console.error("Fixed costs load failed:", res?.error);
+          renderFixedCostList([]);
+          return;
+        }
+        FIXED_COSTS = res.result.fixedCosts || [];
+        renderFixedCostList(FIXED_COSTS);
+      })
+      .withFailureHandler((e) => {
+        console.error("Fixed costs error:", e);
+        renderFixedCostList([]);
+      })
+      .listFixedCosts();
+  }
+
+  function renderFixedCostList(items) {
+    const list = $("fixedCostList");
+    const empty = $("fixedCostEmpty");
+
+    if (!list) return;
+
+    if (!items || items.length === 0) {
+      list.innerHTML = "";
+      if (empty) empty.style.display = "block";
+      return;
+    }
+
+    if (empty) empty.style.display = "none";
+
+    list.innerHTML = items.map(item => {
+      const itemJson = JSON.stringify(item).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
+      return `
+        <div class="fixed-cost-item">
+          <div class="fixed-cost-info">
+            <div class="fixed-cost-name">${escapeHtml_(item.name)}</div>
+            <div class="fixed-cost-meta">${escapeHtml_(item.category || "")} ${item.payment ? "/ " + escapeHtml_(item.payment) : ""}</div>
+          </div>
+          <div class="fixed-cost-amount">¥${(item.amount || 0).toLocaleString()}</div>
+          <div class="fixed-cost-actions">
+            <button class="btn-edit-fixed" onclick='editFixedCost(${itemJson})'>編集</button>
+            <button class="btn-delete-fixed" onclick='confirmDeleteFixedCost("${item.id}")'>削除</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function editFixedCost(item) {
+    if ($("fixedName")) $("fixedName").value = item.name || "";
+    if ($("fixedAmount")) $("fixedAmount").value = item.amount || "";
+    if ($("fixedCategory")) $("fixedCategory").value = item.category || "";
+    if ($("fixedPayment")) $("fixedPayment").value = item.payment || "";
+    if ($("fixedEditId")) $("fixedEditId").value = item.id || "";
+
+    // フォームを開く
+    const section = $("fixedCostFormSection");
+    const icon = $("fixedFormToggleIcon");
+    if (section) section.style.display = "block";
+    if (icon) icon.textContent = "−";
+  }
+
+  function saveFixedCost() {
+    const name = $("fixedName")?.value?.trim();
+    const amount = Number($("fixedAmount")?.value);
+
+    if (!name) {
+      setFixedStatus("名前を入力してください", "error");
+      return;
+    }
+    if (!amount || amount <= 0) {
+      setFixedStatus("金額を入力してください", "error");
+      return;
+    }
+
+    const data = {
+      id: $("fixedEditId")?.value || "",
+      name: name,
+      amount: amount,
+      category: $("fixedCategory")?.value || "",
+      payment: $("fixedPayment")?.value || "",
+      active: true
+    };
+
+    const btn = $("btnSaveFixed");
+    if (btn) btn.disabled = true;
+    setFixedStatus("保存中...", "processing");
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (btn) btn.disabled = false;
+
+        if (!res || !res.ok) {
+          setFixedStatus("保存失敗: " + (res?.error?.user_message || "エラー"), "error");
+          return;
+        }
+
+        setFixedStatus("保存しました！", "success");
+
+        setTimeout(() => {
+          cancelFixedCostForm();
+          loadFixedCosts();
+          loadInsights();  // 固定費比率を更新
+        }, 500);
+      })
+      .withFailureHandler((e) => {
+        if (btn) btn.disabled = false;
+        setFixedStatus("エラー: " + (e?.message || String(e)), "error");
+      })
+      .saveFixedCost(data);
+  }
+
+  function confirmDeleteFixedCost(id) {
+    if (!confirm("この固定費を削除しますか？")) return;
+    deleteFixedCost(id);
+  }
+
+  function deleteFixedCost(id) {
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (res && res.ok) {
+          loadFixedCosts();
+          loadInsights();
+        } else {
+          alert(res?.error?.user_message || "削除に失敗しました");
+        }
+      })
+      .withFailureHandler((e) => {
+        alert("エラー: " + (e?.message || String(e)));
+      })
+      .deleteFixedCost(id);
   }
 
   /* ========== 初期化 ========== */

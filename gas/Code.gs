@@ -1134,3 +1134,194 @@ function ruleDraftFromText_(text, ui) {
     explanation: "簡易推定（AI無効/未設定）"
   };
 }
+
+/** ========== 固定費管理 ========== */
+
+/**
+ * 固定費一覧を取得
+ * @return {Object} { ok, result: { fixedCosts } }
+ */
+function listFixedCosts() {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    const sheet = getOrCreateFixedCostsSheet_();
+    const values = sheet.getDataRange().getValues();
+
+    if (values.length <= 1) {
+      return {
+        ok: true,
+        result: { fixedCosts: [], meta: { duration_ms: Date.now() - started } }
+      };
+    }
+
+    const headers = values[0];
+    const idxMap = {};
+    headers.forEach((h, i) => { idxMap[String(h).toLowerCase()] = i; });
+
+    const fixedCosts = [];
+    for (let r = 1; r < values.length; r++) {
+      const row = values[r];
+      const active = row[idxMap["active"]];
+      if (active === false || active === "FALSE") continue;
+
+      fixedCosts.push({
+        id: String(row[idxMap["id"]] || ""),
+        name: String(row[idxMap["name"]] || ""),
+        amount: Number(row[idxMap["amount"]] || 0),
+        category: String(row[idxMap["category"]] || ""),
+        payment: String(row[idxMap["payment"]] || ""),
+        active: active !== false && active !== "FALSE",
+        memo: String(row[idxMap["memo"]] || "")
+      });
+    }
+
+    logSuccess_(traceId, "listFixedCosts", Date.now() - started, {});
+
+    return {
+      ok: true,
+      result: { fixedCosts, meta: { duration_ms: Date.now() - started } }
+    };
+
+  } catch (err) {
+    logError_(traceId, "listFixedCosts", Date.now() - started, normalizeError_(err, traceId).code, String(err), {});
+    return makeErrResult_(err, traceId, started);
+  }
+}
+
+/**
+ * 固定費を保存（新規or更新）
+ * @param {Object} data { id, name, amount, category, payment, active }
+ * @return {Object} { ok, result: { id } }
+ */
+function saveFixedCost(data) {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    if (!data || !data.name) {
+      throw makeAppError_("E_BAD_REQUEST", "Name is required", traceId, false, "名前が入力されていません。");
+    }
+
+    const sheet = getOrCreateFixedCostsSheet_();
+    const values = sheet.getDataRange().getValues();
+    const headers = values[0];
+    const idxMap = {};
+    headers.forEach((h, i) => { idxMap[String(h).toLowerCase()] = i; });
+
+    const now = new Date().toISOString();
+    let targetId = data.id;
+
+    if (targetId) {
+      // 更新
+      let found = false;
+      for (let r = 1; r < values.length; r++) {
+        if (String(values[r][idxMap["id"]]) === targetId) {
+          sheet.getRange(r + 1, idxMap["name"] + 1).setValue(data.name);
+          sheet.getRange(r + 1, idxMap["amount"] + 1).setValue(data.amount || 0);
+          sheet.getRange(r + 1, idxMap["category"] + 1).setValue(data.category || "");
+          sheet.getRange(r + 1, idxMap["payment"] + 1).setValue(data.payment || "");
+          sheet.getRange(r + 1, idxMap["active"] + 1).setValue(data.active !== false);
+          sheet.getRange(r + 1, idxMap["updated_at"] + 1).setValue(now);
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        throw makeAppError_("E_NOT_FOUND", `Fixed cost not found: ${targetId}`, traceId, false, "該当する固定費が見つかりません。");
+      }
+    } else {
+      // 新規
+      targetId = "FIX_" + Utilities.getUuid().slice(0, 8);
+      const newRow = [];
+      headers.forEach((h, i) => {
+        const key = String(h).toLowerCase();
+        if (key === "id") newRow[i] = targetId;
+        else if (key === "name") newRow[i] = data.name;
+        else if (key === "amount") newRow[i] = data.amount || 0;
+        else if (key === "category") newRow[i] = data.category || "";
+        else if (key === "payment") newRow[i] = data.payment || "";
+        else if (key === "active") newRow[i] = true;
+        else if (key === "memo") newRow[i] = data.memo || "";
+        else if (key === "updated_at") newRow[i] = now;
+        else newRow[i] = "";
+      });
+      sheet.appendRow(newRow);
+    }
+
+    logSuccess_(traceId, "saveFixedCost", Date.now() - started, { fixed_id: targetId });
+
+    return {
+      ok: true,
+      result: { id: targetId, meta: { duration_ms: Date.now() - started } }
+    };
+
+  } catch (err) {
+    logError_(traceId, "saveFixedCost", Date.now() - started, normalizeError_(err, traceId).code, String(err), {});
+    return makeErrResult_(err, traceId, started);
+  }
+}
+
+/**
+ * 固定費を削除
+ * @param {string} id 固定費ID
+ * @return {Object} { ok, result: { deleted_id } }
+ */
+function deleteFixedCost(id) {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    if (!id) {
+      throw makeAppError_("E_BAD_REQUEST", "ID is required", traceId, false, "IDが指定されていません。");
+    }
+
+    const sheet = getOrCreateFixedCostsSheet_();
+    const values = sheet.getDataRange().getValues();
+    const headers = values[0];
+    const idIdx = headers.findIndex(h => String(h).toLowerCase() === "id");
+
+    let deleted = false;
+    for (let r = values.length - 1; r >= 1; r--) {
+      if (String(values[r][idIdx]) === id) {
+        sheet.deleteRow(r + 1);
+        deleted = true;
+        break;
+      }
+    }
+
+    if (!deleted) {
+      throw makeAppError_("E_NOT_FOUND", `Fixed cost not found: ${id}`, traceId, false, "該当する固定費が見つかりません。");
+    }
+
+    logSuccess_(traceId, "deleteFixedCost", Date.now() - started, { fixed_id: id });
+
+    return {
+      ok: true,
+      result: { deleted_id: id, meta: { duration_ms: Date.now() - started } }
+    };
+
+  } catch (err) {
+    logError_(traceId, "deleteFixedCost", Date.now() - started, normalizeError_(err, traceId).code, String(err), {});
+    return makeErrResult_(err, traceId, started);
+  }
+}
+
+/**
+ * 07_FixedCosts シートを取得または作成
+ */
+function getOrCreateFixedCostsSheet_() {
+  const ss = getSs_();
+  let sheet = ss.getSheetByName("07_FixedCosts");
+
+  if (!sheet) {
+    sheet = ss.insertSheet("07_FixedCosts");
+    // ヘッダ行を設定
+    const headers = ["id", "name", "amount", "category", "payment", "active", "memo", "updated_at"];
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
+  }
+
+  return sheet;
+}
