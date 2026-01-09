@@ -1270,6 +1270,7 @@
 
     $("fixedRatio").textContent = fixedCost.this_ratio_pct + "%";
     $("fixedTotal").textContent = fmt(fixedCost.this_total);
+    $("expenseTotal").textContent = fmt(fixedCost.expense_total);
 
     // ドーナツグラフを描画
     renderFixedCostPieChart(fixedCost.pie, fmt);
