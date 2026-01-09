@@ -878,10 +878,22 @@
 
   /**
    * 履歴サマリーを更新（合計金額・件数・タイトル）
+   * 重要: 支出と収入を分けて集計（収入を支出に混ぜない）
    */
   function updateHistorySummary_(transactions, filters) {
-    const sum = (transactions || []).reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-    const cnt = (transactions || []).length;
+    const txns = transactions || [];
+
+    // 支出と収入を分けて集計（type === "expense" / "income"）
+    const expenseTotal = txns
+      .filter(t => t.type === "expense")
+      .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const incomeTotal = txns
+      .filter(t => t.type === "income")
+      .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+
+    const expenseCount = txns.filter(t => t.type === "expense").length;
+    const incomeCount = txns.filter(t => t.type === "income").length;
+    const totalCount = txns.length;
 
     const labels = buildSummaryLabels_(filters);
 
@@ -892,8 +904,18 @@
 
     if (sumTitle) sumTitle.textContent = labels.title;
     if (sumSub) sumSub.textContent = labels.sub || "";
-    if (sumAmount) sumAmount.textContent = `¥${sum.toLocaleString()}`;
-    if (sumCount) sumCount.textContent = `${cnt}件`;
+
+    // 支出のみを表示（収入は含めない）
+    if (sumAmount) sumAmount.textContent = `支出 ¥${expenseTotal.toLocaleString()}`;
+
+    // 件数は全件表示（収入があれば内訳も表示）
+    if (sumCount) {
+      if (incomeCount > 0) {
+        sumCount.textContent = `${totalCount}件（支出${expenseCount}件・収入${incomeCount}件）`;
+      } else {
+        sumCount.textContent = `${totalCount}件`;
+      }
+    }
   }
 
   function renderHistoryCard(txn) {
@@ -904,12 +926,22 @@
       needs_review: "要確認"
     }[txn.status] || txn.status;
 
+    // 収入/支出バッジ（type === "income" / "expense"）
+    const isIncome = txn.type === "income";
+    const typeLabel = isIncome ? "収入" : "支出";
+    const typeBadgeClass = isIncome ? "badge-income" : "badge-expense";
+
+    // 金額表示（収入は+、支出は-）
+    const amountSign = isIncome ? "+" : "-";
+    const amountClass = isIncome ? "history-amount income" : "history-amount expense";
+
     const txnJson = JSON.stringify(txn).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
 
     return `
-      <div class="history-card">
+      <div class="history-card ${isIncome ? 'income-card' : ''}">
         <div class="history-card-row1">
           <span class="history-date">${escapeHtml_(dateDisplay)}</span>
+          <span class="badge ${typeBadgeClass}">${typeLabel}</span>
           <span class="badge badge-${txn.status}">${statusLabel}</span>
         </div>
         <div class="history-card-row2">
@@ -918,7 +950,7 @@
         <div class="history-card-row3">
           ${escapeHtml_(txn.category)}${txn.subcategory ? " / " + escapeHtml_(txn.subcategory) : ""}
         </div>
-        <div class="history-amount">¥${txn.amount.toLocaleString()}</div>
+        <div class="${amountClass}">${amountSign}¥${txn.amount.toLocaleString()}</div>
         <div class="history-card-actions">
           <button class="btn-edit" onclick='openEditModal(${txnJson})'>編集</button>
           <button class="btn-delete" onclick='confirmDelete("${txn.id}")'>削除</button>
