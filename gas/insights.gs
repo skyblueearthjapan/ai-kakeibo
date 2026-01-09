@@ -140,20 +140,42 @@ function buildCategoryDiff_(thisMap, prevMap) {
 
 /**
  * Fixed cost ratio and breakdown.
+ * 07_FixedCosts シートから直接読み込んで計算（カテゴリベースではなく）
+ * @param {number} txnExpenseTotal - 04_Transactions の支出合計
  */
-function computeFixedCost_(thisCatMap, thisExpenseTotal, fixedCategories) {
-  let fixedTotal = 0;
-  const breakdown = [];
+function computeFixedCost_(thisCatMap, txnExpenseTotal, fixedCategories) {
+  // 07_FixedCosts シートから active=TRUE の固定費を全件取得
+  const fixedCosts = getActiveFixedCostsForInsights_();
 
-  for (const cat of fixedCategories) {
-    const amt = Number(thisCatMap[cat] || 0);
-    if (amt > 0) breakdown.push({ category: cat, amount: Math.round(amt) });
-    fixedTotal += amt;
-  }
+  // デバッグログ
+  console.log("[FIXED] rows=", fixedCosts.length);
 
-  breakdown.sort((a, b) => b.amount - a.amount);
+  // active=TRUE の固定費を全件合算（reduce の初期値 0 必須）
+  const fixedTotal = fixedCosts.reduce(function(sum, r) {
+    return sum + (Number(r.amount) || 0);
+  }, 0);
 
-  const ratioPct = thisExpenseTotal > 0 ? round1_((fixedTotal / thisExpenseTotal) * 100) : 0;
+  console.log("[FIXED] fixedTotal=", fixedTotal);
+  console.log("[FIXED] txnExpenseTotal=", txnExpenseTotal);
+
+  // breakdown: 固定費の内訳
+  const breakdown = fixedCosts
+    .filter(function(r) { return (Number(r.amount) || 0) > 0; })
+    .map(function(r) {
+      return {
+        category: r.category || "固定費",
+        name: r.name,
+        amount: Math.round(Number(r.amount) || 0)
+      };
+    })
+    .sort(function(a, b) { return b.amount - a.amount; });
+
+  // 固定費が transactions に入っていない運用なので、分母に fixedTotal を加算
+  const expenseTotal = txnExpenseTotal + fixedTotal;
+  console.log("[FIXED] expenseTotal (txn+fixed)=", expenseTotal);
+
+  const ratioPct = expenseTotal > 0 ? round1_((fixedTotal / expenseTotal) * 100) : 0;
+  console.log("[FIXED] ratio%=", ratioPct);
 
   return {
     categories: fixedCategories,
@@ -161,6 +183,62 @@ function computeFixedCost_(thisCatMap, thisExpenseTotal, fixedCategories) {
     this_ratio_pct: ratioPct,
     breakdown
   };
+}
+
+/**
+ * 07_FixedCosts から active=TRUE の固定費を取得（インサイト用）
+ */
+function getActiveFixedCostsForInsights_() {
+  const ss = getSs_();
+  const sheet = ss.getSheetByName("07_FixedCosts");
+  if (!sheet) {
+    console.log("[FIXED] 07_FixedCosts シートが存在しません");
+    return [];
+  }
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    console.log("[FIXED] 07_FixedCosts データなし（ヘッダのみ）");
+    return [];
+  }
+
+  const headers = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
+  const idxName = headers.indexOf("name");
+  const idxAmount = headers.indexOf("amount");
+  const idxCategory = headers.indexOf("category");
+  const idxActive = headers.indexOf("active");
+
+  const results = [];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var activeRaw = row[idxActive];
+    var activeStr = String(activeRaw).toUpperCase().trim();
+
+    // active判定
+    var isActive = (activeRaw === true) ||
+                   (activeStr === "TRUE") ||
+                   (activeStr === "1") ||
+                   (activeStr === "YES") ||
+                   (activeStr === "ON");
+
+    if (isActive) {
+      var name = String(row[idxName] || "").trim();
+      var amount = Number(row[idxAmount]) || 0;
+
+      console.log("[FIXED] 行" + (i+1) + ": " + name + " ¥" + amount + " active=" + activeRaw);
+
+      if (name && amount > 0) {
+        results.push({
+          name: name,
+          amount: amount,
+          category: String(row[idxCategory] || "").trim()
+        });
+      }
+    }
+  }
+
+  console.log("[FIXED] 有効な固定費: " + results.length + "件, 合計: ¥" + results.reduce(function(s,r){return s+r.amount;},0));
+  return results;
 }
 
 function getDefaultFixedCategories_() {
