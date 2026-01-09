@@ -12,7 +12,14 @@
     <div class="subtitle">かんたん入力・レシート撮影</div>
   </header>
 
-  <main class="wrap">
+  <!-- タブナビゲーション -->
+  <nav class="tabs">
+    <button class="tab active" data-tab="home" onclick="switchTab('home')">ホーム</button>
+    <button class="tab" data-tab="history" onclick="switchTab('history')">履歴</button>
+  </nav>
+
+  <!-- ホームタブ -->
+  <main id="tab-home" class="wrap tab-content active">
     <!-- テキスト入力カード -->
     <section class="card pastel-lav">
       <h3>かんたん入力</h3>
@@ -35,6 +42,92 @@
       <pre id="status" class="status">待機中...</pre>
     </section>
   </main>
+
+  <!-- 履歴タブ -->
+  <main id="tab-history" class="wrap tab-content">
+    <!-- 月選択・フィルタ -->
+    <section class="card pastel-yellow">
+      <div class="history-controls">
+        <div class="month-selector">
+          <button class="btn-small" onclick="changeMonth(-1)">&lt;</button>
+          <span id="currentMonth">2026-01</span>
+          <button class="btn-small" onclick="changeMonth(1)">&gt;</button>
+        </div>
+        <select id="statusFilter" onchange="loadHistory()">
+          <option value="">すべて</option>
+          <option value="pending">未確定</option>
+          <option value="needs_review">要確認</option>
+          <option value="confirmed">確定済み</option>
+        </select>
+        <button class="btn-small" onclick="loadHistory()">更新</button>
+      </div>
+    </section>
+
+    <!-- 未確定（date空）セクション -->
+    <section id="undatedSection" class="card pastel-pink" style="display:none;">
+      <h3>日付未確定</h3>
+      <div id="undatedList" class="history-list"></div>
+    </section>
+
+    <!-- 履歴一覧 -->
+    <section class="card">
+      <h3 id="historyTitle">取引一覧</h3>
+      <div id="historyLoading" class="loading" style="display:none;">読み込み中...</div>
+      <div id="historyList" class="history-list"></div>
+      <div id="historyEmpty" class="empty-message" style="display:none;">該当する取引がありません</div>
+    </section>
+  </main>
+
+  <!-- 編集モーダル -->
+  <div id="editModal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>取引を編集</h3>
+        <button class="modal-close" onclick="closeEditModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editId">
+
+        <label>日付</label>
+        <input type="date" id="editDate">
+
+        <label>金額</label>
+        <input type="number" id="editAmount" min="0">
+
+        <label>カテゴリ</label>
+        <input type="text" id="editCategory" placeholder="例：食費">
+
+        <label>小分類</label>
+        <input type="text" id="editSubcategory" placeholder="例：カフェ">
+
+        <label>支払方法</label>
+        <input type="text" id="editPaymentMethod" placeholder="例：現金">
+
+        <label>店名/支払先</label>
+        <input type="text" id="editMerchant" placeholder="例：スターバックス">
+
+        <label>品目</label>
+        <input type="text" id="editItem" placeholder="例：ラテ">
+
+        <label>メモ</label>
+        <input type="text" id="editMemo">
+
+        <label>タグ</label>
+        <input type="text" id="editTags" placeholder="カンマ区切り">
+
+        <label>ステータス</label>
+        <select id="editStatus">
+          <option value="confirmed">確定</option>
+          <option value="pending">未確定</option>
+          <option value="needs_review">要確認</option>
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary" onclick="closeEditModal()">キャンセル</button>
+        <button id="btnSaveEdit" class="btn primary" onclick="saveEdit()">保存</button>
+      </div>
+    </div>
+  </div>
 
   <?!= include('ui_app'); ?>
 </body>

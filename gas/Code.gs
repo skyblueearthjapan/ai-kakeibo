@@ -174,3 +174,136 @@ function parseDataUrl_(dataUrl, traceId) {
   }
   return { mimeType: m[1], base64: m[2] };
 }
+
+/** ========== Phase 3: 履歴取得・更新 ========== */
+
+/**
+ * UI -> GAS: 取引一覧を取得
+ * @param {string} monthStart YYYY-MM-DD（月初）、未指定なら当月
+ * @param {Object=} filters { status, category, limit, includeUndated }
+ * @return {Object} TransactionListResult
+ */
+function listTransactions(monthStart, filters) {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    // デフォルト値
+    const ms = monthStart || getCurrentMonthStart_();
+    const f = filters || {};
+    const limit = f.limit || 200;
+    const includeUndated = f.includeUndated !== false; // デフォルトtrue
+
+    const values = getTransactionsAllValues_();
+    if (values.length <= 1) {
+      return {
+        ok: true,
+        result: {
+          monthStart: ms,
+          rows: [],
+          undatedRows: [],
+          meta: { duration_ms: Date.now() - started }
+        }
+      };
+    }
+
+    const idxMap = buildTransactionsHeaderIndex_(values[0]);
+
+    const rows = [];
+    const undatedRows = [];
+
+    for (let r = 1; r < values.length; r++) {
+      const obj = rowToObject_(values[r], idxMap);
+
+      // フィルタ: status
+      if (f.status && obj.status !== f.status) continue;
+
+      // フィルタ: category
+      if (f.category && obj.category !== f.category) continue;
+
+      // 日付による分類
+      if (!obj.date) {
+        // 未確定（date空）
+        if (includeUndated) {
+          undatedRows.push(obj);
+        }
+      } else if (isInMonth_(obj.date, ms)) {
+        rows.push(obj);
+      }
+    }
+
+    // 日付降順でソート（新しい順）
+    rows.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+
+    // limit適用
+    const limitedRows = rows.slice(0, limit);
+    const limitedUndated = undatedRows.slice(0, limit);
+
+    return {
+      ok: true,
+      result: {
+        monthStart: ms,
+        rows: limitedRows,
+        undatedRows: limitedUndated,
+        meta: { duration_ms: Date.now() - started }
+      }
+    };
+
+  } catch (err) {
+    return makeErrResult_(err, traceId, started);
+  }
+}
+
+/**
+ * UI -> GAS: 取引を更新
+ * @param {string} id 取引ID
+ * @param {Object} patch 更新するフィールド
+ * @return {Object} TransactionResult
+ */
+function updateTransaction(id, patch) {
+  const traceId = makeTraceId_();
+  const started = Date.now();
+
+  try {
+    if (!id) {
+      throw makeAppError_("E_BAD_REQUEST", "ID is required", traceId, false, "IDが指定されていません。");
+    }
+
+    if (!patch || typeof patch !== "object") {
+      throw makeAppError_("E_BAD_REQUEST", "Patch is required", traceId, false, "更新データが指定されていません。");
+    }
+
+    // パッチ検証
+    validatePatch_(patch, traceId);
+
+    return withSheetLock_(() => {
+      const sheet = getSheetByName_("04_Transactions");
+      const values = sheet.getDataRange().getValues();
+      const idxMap = buildTransactionsHeaderIndex_(values[0]);
+
+      // 行を検索
+      const rowNumber = findRowById_(id, values, idxMap);
+      if (!rowNumber) {
+        throw makeAppError_("E_NOT_FOUND", `Transaction not found: ${id}`, traceId, false, "該当する取引が見つかりません。");
+      }
+
+      // パッチ適用
+      applyPatchToRow_(sheet, rowNumber, idxMap, patch);
+
+      // 更新後のデータを取得して返す
+      const updatedRow = sheet.getRange(rowNumber, 1, 1, values[0].length).getValues()[0];
+      const updatedObj = rowToObject_(updatedRow, idxMap);
+
+      return {
+        ok: true,
+        result: {
+          transaction: updatedObj,
+          meta: { duration_ms: Date.now() - started }
+        }
+      };
+    });
+
+  } catch (err) {
+    return makeErrResult_(err, traceId, started);
+  }
+}

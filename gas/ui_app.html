@@ -162,4 +162,202 @@
       reader.readAsDataURL(file);
     });
   }
+
+  /* ========== Phase 3: タブ・履歴・編集 ========== */
+
+  // 現在の月（YYYY-MM-DD形式の月初）
+  let currentMonthStart = getCurrentMonthStart();
+
+  /**
+   * 現在月の月初を取得
+   */
+  function getCurrentMonthStart() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = ("0" + (now.getMonth() + 1)).slice(-2);
+    return `${y}-${m}-01`;
+  }
+
+  /**
+   * タブ切り替え
+   */
+  function switchTab(tabName) {
+    // タブボタンのアクティブ状態を更新
+    document.querySelectorAll(".tab").forEach(t => {
+      t.classList.toggle("active", t.dataset.tab === tabName);
+    });
+
+    // タブコンテンツの表示切り替え
+    document.querySelectorAll(".tab-content").forEach(c => {
+      c.classList.toggle("active", c.id === `tab-${tabName}`);
+    });
+
+    // 履歴タブに切り替えたら読み込み
+    if (tabName === "history") {
+      loadHistory();
+    }
+  }
+
+  /**
+   * 月を変更
+   */
+  function changeMonth(delta) {
+    const d = new Date(currentMonthStart);
+    d.setMonth(d.getMonth() + delta);
+    const y = d.getFullYear();
+    const m = ("0" + (d.getMonth() + 1)).slice(-2);
+    currentMonthStart = `${y}-${m}-01`;
+    $("currentMonth").textContent = `${y}-${m}`;
+    loadHistory();
+  }
+
+  /**
+   * 履歴を読み込み
+   */
+  function loadHistory() {
+    const statusFilter = $("statusFilter").value;
+    const filters = {};
+    if (statusFilter) filters.status = statusFilter;
+    filters.includeUndated = true;
+
+    $("historyLoading").style.display = "block";
+    $("historyList").innerHTML = "";
+    $("historyEmpty").style.display = "none";
+    $("undatedSection").style.display = "none";
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        $("historyLoading").style.display = "none";
+
+        if (!res || !res.ok) {
+          $("historyEmpty").style.display = "block";
+          $("historyEmpty").textContent = res?.error?.user_message || "読み込みに失敗しました";
+          return;
+        }
+
+        const { rows, undatedRows } = res.result;
+
+        // 未確定セクション
+        if (undatedRows && undatedRows.length > 0) {
+          $("undatedSection").style.display = "block";
+          $("undatedList").innerHTML = undatedRows.map(renderHistoryCard).join("");
+        }
+
+        // メインリスト
+        if (rows && rows.length > 0) {
+          $("historyList").innerHTML = rows.map(renderHistoryCard).join("");
+        } else if (!undatedRows || undatedRows.length === 0) {
+          $("historyEmpty").style.display = "block";
+        }
+      })
+      .withFailureHandler((e) => {
+        $("historyLoading").style.display = "none";
+        $("historyEmpty").style.display = "block";
+        $("historyEmpty").textContent = "読み込みエラー: " + (e?.message || String(e));
+      })
+      .listTransactions(currentMonthStart, filters);
+  }
+
+  /**
+   * 履歴カードをレンダリング
+   */
+  function renderHistoryCard(txn) {
+    const dateDisplay = txn.date || "日付未確定";
+    const statusLabel = {
+      confirmed: "確定",
+      pending: "未確定",
+      needs_review: "要確認"
+    }[txn.status] || txn.status;
+
+    return `
+      <div class="history-card" onclick='openEditModal(${JSON.stringify(txn).replace(/'/g, "&#39;")})'>
+        <div class="history-card-row1">
+          <span class="history-date">${dateDisplay}</span>
+          <span class="badge badge-${txn.status}">${statusLabel}</span>
+        </div>
+        <div class="history-card-row2">
+          ${txn.merchant || txn.item || "(詳細なし)"}
+        </div>
+        <div class="history-card-row3">
+          ${txn.category}${txn.subcategory ? " / " + txn.subcategory : ""}
+        </div>
+        <div class="history-amount">¥${txn.amount.toLocaleString()}</div>
+      </div>
+    `;
+  }
+
+  /**
+   * 編集モーダルを開く
+   */
+  function openEditModal(txn) {
+    $("editId").value = txn.id;
+    $("editDate").value = txn.date || "";
+    $("editAmount").value = txn.amount || "";
+    $("editCategory").value = txn.category || "";
+    $("editSubcategory").value = txn.subcategory || "";
+    $("editPaymentMethod").value = txn.payment_method || "";
+    $("editMerchant").value = txn.merchant || "";
+    $("editItem").value = txn.item || "";
+    $("editMemo").value = txn.memo || "";
+    $("editTags").value = txn.tags || "";
+    $("editStatus").value = txn.status || "pending";
+
+    $("editModal").style.display = "flex";
+  }
+
+  /**
+   * 編集モーダルを閉じる
+   */
+  function closeEditModal() {
+    $("editModal").style.display = "none";
+  }
+
+  /**
+   * 編集を保存
+   */
+  function saveEdit() {
+    const id = $("editId").value;
+    if (!id) return;
+
+    const patch = {
+      date: $("editDate").value,
+      amount: Number($("editAmount").value) || 0,
+      category: $("editCategory").value,
+      subcategory: $("editSubcategory").value,
+      payment_method: $("editPaymentMethod").value,
+      merchant: $("editMerchant").value,
+      item: $("editItem").value,
+      memo: $("editMemo").value,
+      tags: $("editTags").value,
+      status: $("editStatus").value
+    };
+
+    $("btnSaveEdit").disabled = true;
+    $("btnSaveEdit").textContent = "保存中...";
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        $("btnSaveEdit").disabled = false;
+        $("btnSaveEdit").textContent = "保存";
+
+        if (res && res.ok) {
+          closeEditModal();
+          loadHistory();
+        } else {
+          alert(res?.error?.user_message || "保存に失敗しました");
+        }
+      })
+      .withFailureHandler((e) => {
+        $("btnSaveEdit").disabled = false;
+        $("btnSaveEdit").textContent = "保存";
+        alert("エラー: " + (e?.message || String(e)));
+      })
+      .updateTransaction(id, patch);
+  }
+
+  // 初期化：現在月を表示
+  document.addEventListener("DOMContentLoaded", () => {
+    const d = new Date(currentMonthStart);
+    $("currentMonth").textContent = `${d.getFullYear()}-${("0" + (d.getMonth() + 1)).slice(-2)}`;
+  });
 </script>
