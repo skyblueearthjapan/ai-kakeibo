@@ -638,6 +638,7 @@ function saveTransactionDraft(draft, clientContext) {
   const started = Date.now();
   const clientRequestId = clientContext?.client_request_id || null;
   let lock = null;
+  let acquiredClientLock = false;  // clientRequestIdロックを取得したか
 
   try {
     // DocumentLock取得（WebApp安全）
@@ -654,6 +655,7 @@ function saveTransactionDraft(draft, clientContext) {
       if (!tryAcquireProcessingLock_(clientRequestId)) {
         throw makeAppError_("E_DUPLICATE_REQUEST", "Request already in progress", traceId, false, "処理中です。しばらくお待ちください。");
       }
+      acquiredClientLock = true;  // ロック取得成功
     }
 
     // バリデーション
@@ -683,17 +685,12 @@ function saveTransactionDraft(draft, clientContext) {
 
     if (clientRequestId) {
       markAsProcessed_(clientRequestId, txnId, result);
-      releaseProcessingLock_(clientRequestId);
     }
 
     return result;
 
   } catch (err) {
     appendLog_("ERROR", `saveTransactionDraft failed: ${err}`, traceId);
-
-    if (clientRequestId) {
-      releaseProcessingLock_(clientRequestId);
-    }
 
     return {
       ok: false,
@@ -707,6 +704,15 @@ function saveTransactionDraft(draft, clientContext) {
   } finally {
     // DocumentLock確実解放
     releaseProcessingLockSafe_(lock, traceId);
+
+    // clientRequestIdロックも必ず解除（tryAcquireした場合のみ）
+    if (acquiredClientLock && clientRequestId) {
+      try {
+        releaseProcessingLock_(clientRequestId);
+      } catch (e) {
+        console.log(`[LOCK] client lock release failed: ${e}`);
+      }
+    }
   }
 }
 
