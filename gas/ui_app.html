@@ -237,9 +237,10 @@
     if (catEl && draft.category) catEl.value = draft.category;
     if (payEl && draft.payment_method) payEl.value = draft.payment_method;
 
-    // raw_textがあればメモに追加
-    if (memoEl && draft.raw_text) {
-      memoEl.value = memoEl.value ? memoEl.value + "\n" + draft.raw_text : draft.raw_text;
+    // 重要: AI整形後のmemoを使用（raw_textは使わない）
+    // これにより「この内容でOK」後の保存でAI整形メモが保存される
+    if (memoEl && draft.memo) {
+      memoEl.value = draft.memo;
     }
   }
 
@@ -268,6 +269,9 @@
     const btn = $("btnSaveHome");
     if (btn) btn.disabled = true;
     setHomeStatus("保存中...");
+
+    // デバッグ: 保存直前のmemoを確認（AI整形文になっているか）
+    console.log("[saveFromHome] payload.memo =", draft.memo);
 
     google.script.run
       .withSuccessHandler((res) => {
