@@ -4,6 +4,69 @@
   // UIマスタデータ（カテゴリ/支払方法）
   let MASTER = null;
 
+  /* ========== キャッシュ管理（体感速度改善） ========== */
+
+  const CACHE_PREFIX = "kakeibo_";
+  const CACHE_TTL = 5 * 60 * 1000; // 5分
+
+  /**
+   * キャッシュに保存
+   */
+  function setCache_(key, data) {
+    try {
+      const item = {
+        data: data,
+        timestamp: Date.now()
+      };
+      sessionStorage.setItem(CACHE_PREFIX + key, JSON.stringify(item));
+    } catch (e) {
+      console.warn("Cache write failed:", e);
+    }
+  }
+
+  /**
+   * キャッシュから取得（TTL考慮）
+   */
+  function getCache_(key, ignoreTTL = false) {
+    try {
+      const raw = sessionStorage.getItem(CACHE_PREFIX + key);
+      if (!raw) return null;
+      const item = JSON.parse(raw);
+      if (!ignoreTTL && Date.now() - item.timestamp > CACHE_TTL) {
+        return null; // 期限切れ
+      }
+      return item.data;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * キャッシュを削除
+   */
+  function clearCache_(key) {
+    try {
+      if (key) {
+        sessionStorage.removeItem(CACHE_PREFIX + key);
+      } else {
+        // 全キャッシュクリア
+        Object.keys(sessionStorage).forEach(k => {
+          if (k.startsWith(CACHE_PREFIX)) {
+            sessionStorage.removeItem(k);
+          }
+        });
+      }
+    } catch (e) {}
+  }
+
+  /**
+   * 履歴キャッシュキーを生成
+   */
+  function historyKey_(month, filters) {
+    const f = filters || {};
+    return `history_${month}_${f.status || ""}_${f.category || ""}_${f.payment_method || ""}`;
+  }
+
   /* ========== 共通ユーティリティ ========== */
 
   /**
@@ -656,7 +719,8 @@
   }
 
   /**
-   * 入力タブから保存
+   * 入力タブから保存（Optimistic UI対応）
+   * 0.2秒以内にUIが反応するように設計
    */
   function saveDraft() {
     const amount = Number($("formAmount")?.value);
@@ -678,28 +742,52 @@
     };
 
     const btn = $("btnSaveDraft");
-    if (btn) btn.disabled = true;
-    setFormStatus("保存中...");
 
+    // ====== Optimistic UI: 即時フィードバック ======
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "✓ 保存しました";
+      btn.classList.add("btn-success");
+    }
+    setFormStatus("保存しました");
+
+    // キャッシュを無効化（次回loadHistoryで最新データを取得）
+    clearCache_();
+
+    // フォームを即クリア（体感速度向上）
+    setTimeout(() => {
+      clearForm();
+      if (btn) {
+        btn.textContent = "保存";
+        btn.classList.remove("btn-success");
+      }
+    }, 800);
+
+    // ====== バックグラウンドで実際の保存処理 ======
     google.script.run
       .withSuccessHandler((res) => {
         if (btn) btn.disabled = false;
 
         if (!res || !res.ok) {
+          // 保存失敗: エラー表示（稀なケース）
           setFormStatus("保存失敗: " + (res?.error?.user_message || "エラー"));
+          if (btn) {
+            btn.textContent = "保存";
+            btn.classList.remove("btn-success");
+          }
           return;
         }
 
-        const t = res.result.transaction;
-        setFormStatus(`保存しました (ID: ${t.id})`);
-
-        setTimeout(() => {
-          clearForm();
-        }, 1500);
+        // 成功（すでにUIは更新済みなので何もしない）
+        console.log("Transaction saved:", res.result.transaction?.id);
       })
       .withFailureHandler((e) => {
-        if (btn) btn.disabled = false;
-        setFormStatus("エラー: " + (e?.message || String(e)));
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "保存";
+          btn.classList.remove("btn-success");
+        }
+        setFormStatus("エラー: " + (e?.message || String(e)) + "（再試行してください）");
       })
       .saveTransactionDraft(draft, clientContext_());
   }
@@ -777,57 +865,91 @@
       query: queryFilter
     };
 
-    $("historyLoading").style.display = "block";
-    $("historyList").innerHTML = "";
+    const cacheKey = historyKey_(currentMonthStart, filters);
+
+    // ====== 段階1: キャッシュから即時表示（0.2秒以内に視覚変化） ======
+    const cached = getCache_(cacheKey, true); // TTL無視でも表示
+    if (cached && cached.rows) {
+      renderHistoryData_(cached.rows, queryFilter, filterLabels, true);
+    }
+
+    // ローディング表示（キャッシュがない場合のみフルローディング）
+    if (!cached) {
+      $("historyLoading").style.display = "block";
+      $("historyList").innerHTML = "";
+    }
     $("historyEmpty").style.display = "none";
 
+    // ====== 段階2: サーバーから最新データを取得 ======
     google.script.run
       .withSuccessHandler((res) => {
         $("historyLoading").style.display = "none";
 
         if (!res || !res.ok) {
-          $("historyEmpty").style.display = "block";
-          $("historyEmpty").textContent = res?.error?.user_message || "読み込みに失敗しました";
-          updateHistorySummary_([], filterLabels);
+          // キャッシュがあればそのまま維持、なければエラー表示
+          if (!cached) {
+            $("historyEmpty").style.display = "block";
+            $("historyEmpty").textContent = res?.error?.user_message || "読み込みに失敗しました";
+            updateHistorySummary_([], filterLabels);
+          }
           return;
         }
 
         const { rows } = res.result;
 
-        if (rows && rows.length > 0) {
-          // クライアント側でもフィルタリング（query検索）
-          let filtered = rows;
-          if (queryFilter) {
-            const q = queryFilter.toLowerCase();
-            filtered = rows.filter(txn =>
-              (txn.merchant || "").toLowerCase().includes(q) ||
-              (txn.item || "").toLowerCase().includes(q) ||
-              (txn.memo || "").toLowerCase().includes(q)
-            );
-          }
+        // キャッシュに保存
+        setCache_(cacheKey, { rows: rows });
 
-          // サマリー更新
-          updateHistorySummary_(filtered, filterLabels);
-
-          if (filtered.length > 0) {
-            $("historyList").innerHTML = filtered.map(renderHistoryCard).join("");
-          } else {
-            $("historyEmpty").style.display = "block";
-            $("historyEmpty").textContent = "該当する取引がありません";
-          }
-        } else {
-          updateHistorySummary_([], filterLabels);
-          $("historyEmpty").style.display = "block";
-          $("historyEmpty").textContent = "該当する取引がありません";
-        }
+        // ====== 段階3: 最新データで更新 ======
+        renderHistoryData_(rows, queryFilter, filterLabels, false);
       })
       .withFailureHandler((e) => {
         $("historyLoading").style.display = "none";
-        $("historyEmpty").style.display = "block";
-        $("historyEmpty").textContent = "読み込みエラー: " + (e?.message || String(e));
-        updateHistorySummary_([], filterLabels);
+        // キャッシュがあればそのまま維持
+        if (!cached) {
+          $("historyEmpty").style.display = "block";
+          $("historyEmpty").textContent = "読み込みエラー: " + (e?.message || String(e));
+          updateHistorySummary_([], filterLabels);
+        }
       })
       .listTransactions(currentMonthStart, filters);
+  }
+
+  /**
+   * 履歴データを描画（共通処理）
+   * @param {Array} rows - 取引データ
+   * @param {string} queryFilter - 検索クエリ
+   * @param {Object} filterLabels - フィルタラベル
+   * @param {boolean} isStale - キャッシュデータかどうか
+   */
+  function renderHistoryData_(rows, queryFilter, filterLabels, isStale) {
+    if (rows && rows.length > 0) {
+      // クライアント側でもフィルタリング（query検索）
+      let filtered = rows;
+      if (queryFilter) {
+        const q = queryFilter.toLowerCase();
+        filtered = rows.filter(txn =>
+          (txn.merchant || "").toLowerCase().includes(q) ||
+          (txn.item || "").toLowerCase().includes(q) ||
+          (txn.memo || "").toLowerCase().includes(q)
+        );
+      }
+
+      // サマリー更新
+      updateHistorySummary_(filtered, filterLabels);
+
+      if (filtered.length > 0) {
+        $("historyList").innerHTML = filtered.map(renderHistoryCard).join("");
+        $("historyEmpty").style.display = "none";
+      } else {
+        $("historyEmpty").style.display = "block";
+        $("historyEmpty").textContent = "該当する取引がありません";
+      }
+    } else {
+      updateHistorySummary_([], filterLabels);
+      $("historyEmpty").style.display = "block";
+      $("historyEmpty").textContent = "該当する取引がありません";
+    }
   }
 
   let searchTimeout = null;
@@ -1065,8 +1187,22 @@
   }
 
   function loadDashboard() {
-    $("kpiLoading").style.display = "block";
+    const cacheKey = `dashboard_${analyticsMonthStart}`;
 
+    // ====== 段階1: キャッシュから即時表示 ======
+    const cached = getCache_(cacheKey, true);
+    if (cached) {
+      renderKpi(cached.kpi, cached.currency);
+      renderCategoryChart(cached.byCategory, cached.currency);
+      renderTrendChart(cached.trend12m, cached.currency);
+    }
+
+    // ローディング（キャッシュがない場合のみ表示）
+    if (!cached) {
+      $("kpiLoading").style.display = "block";
+    }
+
+    // ====== 段階2: サーバーから最新データを取得 ======
     google.script.run
       .withSuccessHandler((res) => {
         $("kpiLoading").style.display = "none";
@@ -1078,6 +1214,10 @@
 
         const { kpi, byCategory, trend12m, currency } = res.result;
 
+        // キャッシュに保存
+        setCache_(cacheKey, { kpi, byCategory, trend12m, currency });
+
+        // ====== 段階3: 最新データで更新 ======
         renderKpi(kpi, currency);
         renderCategoryChart(byCategory, currency);
         renderTrendChart(trend12m, currency);
