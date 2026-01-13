@@ -246,6 +246,7 @@
 
   /**
    * ホームフォームから保存
+   * LAST_AI_DRAFTがある場合は、AI判定のtxn_type（expense/income/fixed_cost）を引き継ぐ
    */
   function saveFromHome() {
     const amount = Number($("inputAmount")?.value);
@@ -254,15 +255,21 @@
       return;
     }
 
+    // AI判定のtxn_typeを引き継ぐ（LAST_AI_DRAFTがある場合）
+    const txnType = LAST_AI_DRAFT?.txn_type || "expense";
+    const type = LAST_AI_DRAFT?.type || (txnType === "income" ? "income" : "expense");
+
     const draft = {
       date: $("inputDate")?.value || getTodayISO_(),
+      txn_type: txnType,  // AI判定タイプを含める
+      type: type,         // シート保存用タイプ
       amount: amount,
       merchant: $("inputMerchant")?.value || "",
       category: $("inputCategory")?.value || "",
       subcategory: "",
       payment_method: $("inputPayment")?.value || "",
       memo: $("inputMemo")?.value || "",
-      raw_text: "",
+      raw_text: LAST_AI_DRAFT?.raw_text || "",
       confidence: 0
     };
 
@@ -270,8 +277,8 @@
     if (btn) btn.disabled = true;
     setHomeStatus("保存中...");
 
-    // デバッグ: 保存直前のmemoを確認（AI整形文になっているか）
-    console.log("[saveFromHome] payload.memo =", draft.memo);
+    // デバッグ: 保存直前の情報を確認
+    console.log("[saveFromHome] txn_type =", draft.txn_type, ", memo =", draft.memo);
 
     google.script.run
       .withSuccessHandler((res) => {
@@ -547,10 +554,26 @@
   }
 
   /**
+   * 取引タイプのラベルを取得
+   */
+  function getTxnTypeLabel_(txnType) {
+    const labels = {
+      "expense": "支出（変動費）",
+      "income": "収入",
+      "fixed_cost": "固定費"
+    };
+    return labels[txnType] || "支出";
+  }
+
+  /**
    * AI結果をサマリー文字列に
    */
   function buildAiSummary_(d) {
     const parts = [];
+    // 取引タイプを最初に表示
+    if (d.txn_type && d.txn_type !== "expense") {
+      parts.push(`【${getTxnTypeLabel_(d.txn_type)}】`);
+    }
     if (d.merchant) parts.push(`店名: ${d.merchant}`);
     if (d.amount) parts.push(`金額: ${d.amount}円`);
     if (d.category) parts.push(`カテゴリ: ${d.category}`);
@@ -568,7 +591,11 @@
 
     if (!card || !body) return;
 
+    // 取引タイプを表示
+    const txnTypeLabel = getTxnTypeLabel_(draft.txn_type);
+
     const rows = [
+      ["種別", txnTypeLabel],
       ["日付", draft.date || ""],
       ["金額", draft.amount || 0],
       ["店名/内容", draft.merchant || ""],
@@ -578,13 +605,20 @@
     ];
 
     body.innerHTML = rows.map(([k, v]) => {
-      return `<div class="kv"><div class="k">${escapeHtml_(k)}</div><div class="v">${escapeHtml_(String(v))}</div></div>`;
+      // 種別は強調表示
+      const valueClass = k === "種別" ? "v txn-type-" + (draft.txn_type || "expense") : "v";
+      return `<div class="kv"><div class="k">${escapeHtml_(k)}</div><div class="${valueClass}">${escapeHtml_(String(v))}</div></div>`;
     }).join("");
 
     if (hint) {
-      hint.textContent = aiUsed
+      let hintText = aiUsed
         ? "AI推定です。必要ならフォームで修正できます。"
         : "AI無効のため簡易推定です。フォームで修正してください。";
+      // 固定費の場合は追加説明
+      if (draft.txn_type === "fixed_cost") {
+        hintText += "\n※固定費は自動的に固定費マスタにも登録されます。";
+      }
+      hint.textContent = hintText;
     }
 
     card.style.display = "block";
@@ -1056,19 +1090,37 @@
       needs_review: "要確認"
     }[txn.status] || txn.status;
 
-    // 収入/支出バッジ（type === "income" / "expense"）
+    // 固定費判定（source="fixed_cost" または tags に "fixed_cost" を含む）
+    const isFixedCost = txn.source === "fixed_cost" ||
+                        (txn.tags && String(txn.tags).includes("fixed_cost"));
+
+    // 収入/支出/固定費バッジ
     const isIncome = txn.type === "income";
-    const typeLabel = isIncome ? "収入" : "支出";
-    const typeBadgeClass = isIncome ? "badge-income" : "badge-expense";
+    let typeLabel, typeBadgeClass;
+    if (isIncome) {
+      typeLabel = "収入";
+      typeBadgeClass = "badge-income";
+    } else if (isFixedCost) {
+      typeLabel = "固定費";
+      typeBadgeClass = "badge-fixed";
+    } else {
+      typeLabel = "支出";
+      typeBadgeClass = "badge-expense";
+    }
 
     // 金額表示（収入は+、支出は-）
     const amountSign = isIncome ? "+" : "-";
     const amountClass = isIncome ? "history-amount income" : "history-amount expense";
 
+    // カード全体のスタイル
+    let cardClass = "history-card";
+    if (isIncome) cardClass += " income-card";
+    else if (isFixedCost) cardClass += " fixed-card";
+
     const txnJson = JSON.stringify(txn).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
 
     return `
-      <div class="history-card ${isIncome ? 'income-card' : ''}">
+      <div class="${cardClass}">
         <div class="history-card-row1">
           <span class="history-date">${escapeHtml_(dateDisplay)}</span>
           <span class="badge ${typeBadgeClass}">${typeLabel}</span>

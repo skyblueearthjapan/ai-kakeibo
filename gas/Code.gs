@@ -726,7 +726,21 @@ function saveTransactionDraft(draft, clientContext) {
     // シートに保存（openById経由・WebApp安全）
     const txnId = appendTransactionRow_(row, traceId);
 
-    appendLog_("INFO", `Saved txnId=${txnId}`, traceId);
+    appendLog_("INFO", `Saved txnId=${txnId}, txn_type=${row.__txn_type || "expense"}`, traceId);
+
+    // 固定費の場合：FixedCostsマスタにも同期（名前ベースでupsert）
+    if (row.__txn_type === "fixed_cost") {
+      try {
+        syncFixedCostFromTransaction_(row, traceId);
+        appendLog_("INFO", `Fixed cost synced: ${row.merchant}`, traceId);
+      } catch (syncErr) {
+        // 同期エラーは警告のみ、取引保存は成功扱い
+        appendLog_("WARN", `Fixed cost sync failed: ${syncErr.message}`, traceId);
+      }
+    }
+
+    // 内部プロパティを削除（レスポンスには含めない）
+    delete row.__txn_type;
 
     const result = {
       ok: true,
@@ -772,6 +786,7 @@ function saveTransactionDraft(draft, clientContext) {
 /**
  * DraftオブジェクトをRowオブジェクトに正規化
  * ヘッダ駆動appendTransactionRow_と相性の良い形式に変換
+ * txn_type: expense/income/fixed_cost を処理
  */
 function normalizeDraftToRowObj_(draft, traceId) {
   const d = draft || {};
@@ -779,12 +794,29 @@ function normalizeDraftToRowObj_(draft, traceId) {
   const nowIso = now.toISOString();
   const today = Utilities.formatDate(now, Session.getScriptTimeZone(), "yyyy-MM-dd");
 
+  // txn_type処理: fixed_costはexpenseとして保存し、sourceで識別
+  const txnType = d.txn_type || "expense";
+  let sheetType = d.type || "expense";
+  let source = d.source || "manual";
+  let tags = String(d.tags || "");
+
+  if (txnType === "income") {
+    sheetType = "income";
+  } else if (txnType === "fixed_cost") {
+    sheetType = "expense";  // 固定費は支出として集計
+    source = "fixed_cost";  // sourceで固定費を識別
+    // tagsに追加（重複防止）
+    if (!tags.includes("fixed_cost")) {
+      tags = tags ? tags + ",fixed_cost" : "fixed_cost";
+    }
+  }
+
   return {
     id: generateTransactionId_(),
     created_at: nowIso,
     updated_at: nowIso,
     date: d.date || today,
-    type: d.type || "expense",
+    type: sheetType,
     account: d.account || "",
     merchant: String(d.merchant || ""),
     item: String(d.item || ""),
@@ -793,13 +825,15 @@ function normalizeDraftToRowObj_(draft, traceId) {
     payment_method: String(d.payment_method || d.payment || ""),
     amount: Number(d.amount || 0),
     memo: String(d.memo || ""),
-    tags: String(d.tags || ""),
-    source: d.source || "manual",
+    tags: tags,
+    source: source,
     confidence: 0,
     receipt_file_id: d.receipt_file_id || "",
     raw_text: String(d.raw_text || ""),
     status: "confirmed",  // ユーザー確定なので即confirmed
-    trace_id: traceId
+    trace_id: traceId,
+    // 内部処理用（シートには保存しない）
+    __txn_type: txnType
   };
 }
 
@@ -1044,12 +1078,14 @@ function processSmartInput(text, clientContext) {
 
 /**
  * AI draft builder（OpenAI呼び出し）
+ * 取引タイプ自動判定: expense（変動費）/ income（収入）/ fixed_cost（固定費）
  */
 function aiDraftFromText_(text, ui, traceId) {
   const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
 
   const schemaHint = {
     date: "YYYY-MM-DD",
+    txn_type: "expense | income | fixed_cost",
     amount: 0,
     merchant: "",
     category: "",
@@ -1061,14 +1097,30 @@ function aiDraftFromText_(text, ui, traceId) {
   };
 
   const sys = [
-    "You are an assistant that extracts a household expense transaction from Japanese user text.",
+    "You are an assistant that extracts a household transaction from Japanese user text.",
     "Return ONLY valid JSON (no markdown).",
+    "",
+    "## Transaction Type Detection (IMPORTANT):",
+    "You MUST classify txn_type as one of: expense, income, fixed_cost",
+    "",
+    "### income (収入):",
+    "- Keywords: 給料, 給与, ボーナス, 振込, 収入, 売上, 報酬, 配当",
+    "- Category: 収入",
+    "",
+    "### fixed_cost (固定費):",
+    "- Keywords: 家賃, 住宅ローン, 光熱費, 電気代, ガス代, 水道代, 通信費, スマホ代, 携帯, インターネット, WiFi, 保険, サブスク, Netflix, Spotify, 定額, 毎月",
+    "- Categories: 住居費, 光熱費, 通信費, 保険, サブスク",
+    "",
+    "### expense (変動費) - default:",
+    "- Everything else (食費, 交通, 娯楽, etc.)",
+    "",
     "Choose category/payment_method ONLY from provided lists if possible; otherwise empty string.",
     "If amount is unclear, set amount=0 and needs_confirmation=true.",
-  ].join(" ");
+    "Set memo to a SHORT, clean description (not raw input)."
+  ].join("\n");
 
   const user = {
-    instruction: "Extract transaction fields.",
+    instruction: "Extract transaction fields including txn_type.",
     input_text: text,
     today,
     allowed_categories: ui.categories || [],
@@ -1083,14 +1135,25 @@ function aiDraftFromText_(text, ui, traceId) {
 
   const parsed = callOpenAiJson_(messages, schemaHint, traceId);
 
-  // normalize
+  // txn_type正規化（fixed_costはexpense扱いでTransactionsに保存、tagsで識別）
+  let txnType = String(parsed.txn_type || "expense").toLowerCase();
+  if (!["expense", "income", "fixed_cost"].includes(txnType)) {
+    txnType = "expense";
+  }
+
+  // type: Transactionsシートのtype列用（expense or income）
+  // fixed_costはexpense扱いで保存し、source/tagsで識別
+  const sheetType = (txnType === "income") ? "income" : "expense";
+
   return {
     date: String(parsed.date || today).slice(0, 10),
+    txn_type: txnType,  // AI判定結果（expense/income/fixed_cost）
+    type: sheetType,    // シート保存用（expense/income）
     amount: Number(parsed.amount || 0),
     merchant: String(parsed.merchant || ""),
     category: String(parsed.category || ""),
     payment_method: String(parsed.payment_method || ""),
-    memo: String(parsed.memo || text || ""),
+    memo: String(parsed.memo || ""),
     raw_text: text,
     confidence: Number(parsed.confidence || 0.4),
     needs_confirmation: parsed.needs_confirmation !== false,
@@ -1100,10 +1163,12 @@ function aiDraftFromText_(text, ui, traceId) {
 
 /**
  * Rule-based draft (fallback)
+ * 取引タイプの簡易判定も含む
  */
 function ruleDraftFromText_(text, ui) {
   const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
   const t = String(text || "").trim();
+  const tLower = t.toLowerCase();
 
   // amount: "2000円" "二千円" はまず数字だけを拾う簡易版（漢数字は後で拡張）
   let amount = 0;
@@ -1114,11 +1179,38 @@ function ruleDraftFromText_(text, ui) {
   let merchant = t;
   if (m && m.index !== undefined) merchant = t.slice(0, m.index).trim();
 
+  // 取引タイプ簡易判定
+  let txnType = "expense";
+  let category = "";
+
+  // 収入キーワード
+  const incomeKeywords = ["給料", "給与", "ボーナス", "収入", "振込", "売上", "報酬"];
+  if (incomeKeywords.some(k => t.includes(k))) {
+    txnType = "income";
+    category = "収入";
+  }
+
+  // 固定費キーワード
+  const fixedCostKeywords = ["家賃", "住宅ローン", "光熱費", "電気代", "ガス代", "水道代", "通信費", "携帯", "スマホ", "インターネット", "wifi", "保険", "サブスク", "netflix", "spotify", "定額", "毎月"];
+  if (fixedCostKeywords.some(k => tLower.includes(k))) {
+    txnType = "fixed_cost";
+    // カテゴリ推定
+    if (t.includes("家賃") || t.includes("住宅ローン")) category = "住居費";
+    else if (t.includes("電気") || t.includes("ガス") || t.includes("水道") || t.includes("光熱")) category = "光熱費";
+    else if (t.includes("通信") || t.includes("携帯") || t.includes("スマホ") || tLower.includes("wifi") || t.includes("インターネット")) category = "通信費";
+    else if (t.includes("保険")) category = "保険";
+    else if (t.includes("サブスク") || tLower.includes("netflix") || tLower.includes("spotify")) category = "サブスク";
+  }
+
+  const sheetType = (txnType === "income") ? "income" : "expense";
+
   return {
     date: today,
+    txn_type: txnType,
+    type: sheetType,
     amount,
     merchant,
-    category: "",
+    category,
     payment_method: "",
     memo: t,
     raw_text: t,
@@ -1351,4 +1443,66 @@ function getOrCreateFixedCostsSheet_() {
   }
 
   return sheet;
+}
+
+/**
+ * 取引からFixedCostsマスタに同期（名前ベースでupsert）
+ * AIが「fixed_cost」と判定した取引を、FixedCostsマスタにも反映
+ * @param {Object} row 取引データ（normalizeDraftToRowObj_の出力）
+ * @param {string} traceId
+ */
+function syncFixedCostFromTransaction_(row, traceId) {
+  const sheet = getOrCreateFixedCostsSheet_();
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const idxMap = {};
+  headers.forEach((h, i) => { idxMap[String(h).toLowerCase()] = i; });
+
+  const name = String(row.merchant || "").trim();
+  if (!name) {
+    Logger.log("[" + traceId + "] syncFixedCost: name empty, skip");
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const amount = Number(row.amount || 0);
+  const category = String(row.category || "");
+  const payment = String(row.payment_method || "");
+
+  // 名前で既存エントリを検索
+  let existingRow = -1;
+  for (let r = 1; r < values.length; r++) {
+    const rowName = String(values[r][idxMap["name"]] || "").trim();
+    if (rowName === name) {
+      existingRow = r + 1;  // シート行番号（1-indexed）
+      break;
+    }
+  }
+
+  if (existingRow > 0) {
+    // 更新（金額・カテゴリ・支払方法）
+    sheet.getRange(existingRow, idxMap["amount"] + 1).setValue(amount);
+    if (category) sheet.getRange(existingRow, idxMap["category"] + 1).setValue(category);
+    if (payment) sheet.getRange(existingRow, idxMap["payment"] + 1).setValue(payment);
+    sheet.getRange(existingRow, idxMap["updated_at"] + 1).setValue(now);
+    Logger.log("[" + traceId + "] syncFixedCost: updated '" + name + "'");
+  } else {
+    // 新規作成
+    const newId = "FIX_" + Utilities.getUuid().slice(0, 8);
+    const newRow = [];
+    headers.forEach((h, i) => {
+      const key = String(h).toLowerCase();
+      if (key === "id") newRow[i] = newId;
+      else if (key === "name") newRow[i] = name;
+      else if (key === "amount") newRow[i] = amount;
+      else if (key === "category") newRow[i] = category;
+      else if (key === "payment") newRow[i] = payment;
+      else if (key === "active") newRow[i] = true;
+      else if (key === "memo") newRow[i] = "AI自動登録";
+      else if (key === "updated_at") newRow[i] = now;
+      else newRow[i] = "";
+    });
+    sheet.appendRow(newRow);
+    Logger.log("[" + traceId + "] syncFixedCost: created '" + name + "' as " + newId);
+  }
 }
