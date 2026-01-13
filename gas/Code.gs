@@ -1079,18 +1079,22 @@ function processSmartInput(text, clientContext) {
 /**
  * AI draft builder（OpenAI呼び出し）
  * 取引タイプ自動判定: expense（変動費）/ income（収入）/ fixed_cost（固定費）
+ * 発生日（occurred_at）とタイトル（title）を必須で抽出
  */
 function aiDraftFromText_(text, ui, traceId) {
   const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+  const thisYear = new Date().getFullYear();
+  const thisMonth = new Date().getMonth() + 1;
 
   const schemaHint = {
-    date: "YYYY-MM-DD",
+    occurred_at: "YYYY-MM-DD (発生日。月のみなら月初1日)",
     txn_type: "expense | income | fixed_cost",
+    title: "取引タイトル（必須。店名/内容の短い説明）",
     amount: 0,
     merchant: "",
     category: "",
     payment_method: "",
-    memo: "",
+    memo: "短く整形したメモ",
     confidence: 0.0,
     needs_confirmation: true,
     explanation: ""
@@ -1100,15 +1104,31 @@ function aiDraftFromText_(text, ui, traceId) {
     "You are an assistant that extracts a household transaction from Japanese user text.",
     "Return ONLY valid JSON (no markdown).",
     "",
-    "## Transaction Type Detection (IMPORTANT):",
-    "You MUST classify txn_type as one of: expense, income, fixed_cost",
+    "## CRITICAL: Date Extraction (occurred_at)",
+    "Extract the OCCURRENCE DATE (発生日), NOT today's date.",
+    "- '12月のボーナス' → occurred_at: '" + thisYear + "-12-01' (December 1st)",
+    "- '先月の家賃' → occurred_at: previous month's 1st day",
+    "- '今月の電気代' → occurred_at: this month's 1st day",
+    "- '1/15に買った' → occurred_at: '" + thisYear + "-01-15'",
+    "- No date mentioned → occurred_at: '" + today + "' (today)",
+    "If only month is mentioned, use the 1st day of that month.",
+    "Today is: " + today,
+    "",
+    "## CRITICAL: Title (必須)",
+    "You MUST provide a title. This is the main display text.",
+    "- Use merchant name if available (e.g., 'スタバ', 'イオン')",
+    "- Otherwise, use a short description from memo (e.g., 'ボーナス', '家賃', '電気代')",
+    "- NEVER leave title empty",
+    "",
+    "## Transaction Type Detection:",
+    "Classify txn_type as one of: expense, income, fixed_cost",
     "",
     "### income (収入):",
     "- Keywords: 給料, 給与, ボーナス, 振込, 収入, 売上, 報酬, 配当",
     "- Category: 収入",
     "",
     "### fixed_cost (固定費):",
-    "- Keywords: 家賃, 住宅ローン, 光熱費, 電気代, ガス代, 水道代, 通信費, スマホ代, 携帯, インターネット, WiFi, 保険, サブスク, Netflix, Spotify, 定額, 毎月",
+    "- Keywords: 家賃, 住宅ローン, 光熱費, 電気代, ガス代, 水道代, 通信費, スマホ代, 携帯, インターネット, WiFi, 保険, サブスク, Netflix, Spotify, 定額, 毎月, 奨学金, ローン",
     "- Categories: 住居費, 光熱費, 通信費, 保険, サブスク",
     "",
     "### expense (変動費) - default:",
@@ -1120,9 +1140,11 @@ function aiDraftFromText_(text, ui, traceId) {
   ].join("\n");
 
   const user = {
-    instruction: "Extract transaction fields including txn_type.",
+    instruction: "Extract transaction fields. IMPORTANT: occurred_at is the date the transaction happened, title is required.",
     input_text: text,
     today,
+    this_year: thisYear,
+    this_month: thisMonth,
     allowed_categories: ui.categories || [],
     allowed_payment_methods: ui.paymentMethods || [],
     output_schema: schemaHint
@@ -1135,22 +1157,40 @@ function aiDraftFromText_(text, ui, traceId) {
 
   const parsed = callOpenAiJson_(messages, schemaHint, traceId);
 
-  // txn_type正規化（fixed_costはexpense扱いでTransactionsに保存、tagsで識別）
+  // txn_type正規化
   let txnType = String(parsed.txn_type || "expense").toLowerCase();
   if (!["expense", "income", "fixed_cost"].includes(txnType)) {
     txnType = "expense";
   }
 
   // type: Transactionsシートのtype列用（expense or income）
-  // fixed_costはexpense扱いで保存し、source/tagsで識別
   const sheetType = (txnType === "income") ? "income" : "expense";
 
+  // 発生日の処理（occurred_at優先、なければ今日）
+  let occurredAt = String(parsed.occurred_at || parsed.date || today).slice(0, 10);
+  // 不正な日付の場合は今日にフォールバック
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(occurredAt)) {
+    occurredAt = today;
+  }
+
+  // タイトルの必須化（「詳細なし」根絶）
+  let title = String(parsed.title || "").trim();
+  if (!title) {
+    // フォールバック: merchant → memo先頭 → 種別名
+    title = String(parsed.merchant || "").trim();
+    if (!title) {
+      const memoClean = String(parsed.memo || "").trim();
+      title = memoClean.slice(0, 20) || getTxnTypeFallbackTitle_(txnType);
+    }
+  }
+
   return {
-    date: String(parsed.date || today).slice(0, 10),
-    txn_type: txnType,  // AI判定結果（expense/income/fixed_cost）
-    type: sheetType,    // シート保存用（expense/income）
+    date: occurredAt,           // 発生日を使用
+    txn_type: txnType,          // AI判定結果（expense/income/fixed_cost）
+    type: sheetType,            // シート保存用（expense/income）
+    title: title,               // タイトル（必須）
     amount: Number(parsed.amount || 0),
-    merchant: String(parsed.merchant || ""),
+    merchant: String(parsed.merchant || title),  // merchantが空ならtitleを使用
     category: String(parsed.category || ""),
     payment_method: String(parsed.payment_method || ""),
     memo: String(parsed.memo || ""),
@@ -1159,6 +1199,18 @@ function aiDraftFromText_(text, ui, traceId) {
     needs_confirmation: parsed.needs_confirmation !== false,
     explanation: String(parsed.explanation || "")
   };
+}
+
+/**
+ * 取引タイプに応じたフォールバックタイトル
+ */
+function getTxnTypeFallbackTitle_(txnType) {
+  const titles = {
+    "expense": "支出",
+    "income": "収入",
+    "fixed_cost": "固定費"
+  };
+  return titles[txnType] || "取引";
 }
 
 /**
@@ -1204,12 +1256,19 @@ function ruleDraftFromText_(text, ui) {
 
   const sheetType = (txnType === "income") ? "income" : "expense";
 
+  // title: merchantがあればそれを使用、なければフォールバック
+  let title = merchant || "";
+  if (!title) {
+    title = getTxnTypeFallbackTitle_(txnType);
+  }
+
   return {
     date: today,
     txn_type: txnType,
     type: sheetType,
+    title: title,                   // タイトル（必須）
     amount,
-    merchant,
+    merchant: merchant || title,    // merchantが空ならtitleを使用
     category,
     payment_method: "",
     memo: t,
