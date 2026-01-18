@@ -1123,11 +1123,19 @@ function aiDraftFromText_(text, ui, traceId) {
     "## Transaction Type Detection:",
     "Classify txn_type as one of: expense, income, fixed_cost",
     "",
-    "### income (収入):",
+    "### ★ HIGHEST PRIORITY: User Explicit Instructions ★",
+    "If user explicitly specifies the type, ALWAYS use that type regardless of keywords:",
+    "- '変動費で', '変動費として', '変動費でお願い' → txn_type: expense",
+    "- '固定費で', '固定費として', '固定費でお願い' → txn_type: fixed_cost",
+    "- '収入として', '収入で' → txn_type: income",
+    "Example: '携帯代 3000円 変動費で' → txn_type: expense (user override)",
+    "Example: '生活費 5万円 固定費でお願い' → txn_type: fixed_cost (user override)",
+    "",
+    "### income (収入) - if no explicit instruction:",
     "- Keywords: 給料, 給与, ボーナス, 振込, 収入, 売上, 報酬, 配当",
     "- Category: 収入",
     "",
-    "### fixed_cost (固定費):",
+    "### fixed_cost (固定費) - if no explicit instruction:",
     "- Keywords: 家賃, 住宅ローン, 光熱費, 電気代, ガス代, 水道代, 通信費, スマホ代, 携帯, インターネット, WiFi, 保険, サブスク, Netflix, Spotify, 定額, 毎月, 奨学金, ローン",
     "- Categories: 住居費, 光熱費, 通信費, 保険, サブスク",
     "",
@@ -1231,22 +1239,46 @@ function ruleDraftFromText_(text, ui) {
   let merchant = t;
   if (m && m.index !== undefined) merchant = t.slice(0, m.index).trim();
 
-  // 取引タイプ簡易判定
+  // 取引タイプ判定
   let txnType = "expense";
   let category = "";
+  let userOverride = false;
 
-  // 収入キーワード
-  const incomeKeywords = ["給料", "給与", "ボーナス", "収入", "振込", "売上", "報酬"];
-  if (incomeKeywords.some(k => t.includes(k))) {
+  // ★ 最優先: ユーザー明示指定（「変動費で」「固定費で」「収入として」など）
+  const expenseExplicit = ["変動費で", "変動費として", "変動費でお願い", "変動費に"];
+  const fixedExplicit = ["固定費で", "固定費として", "固定費でお願い", "固定費に"];
+  const incomeExplicit = ["収入として", "収入で", "収入でお願い", "収入に"];
+
+  if (expenseExplicit.some(k => t.includes(k))) {
+    txnType = "expense";
+    userOverride = true;
+  } else if (fixedExplicit.some(k => t.includes(k))) {
+    txnType = "fixed_cost";
+    userOverride = true;
+  } else if (incomeExplicit.some(k => t.includes(k))) {
     txnType = "income";
     category = "収入";
+    userOverride = true;
   }
 
-  // 固定費キーワード
-  const fixedCostKeywords = ["家賃", "住宅ローン", "光熱費", "電気代", "ガス代", "水道代", "通信費", "携帯", "スマホ", "インターネット", "wifi", "保険", "サブスク", "netflix", "spotify", "定額", "毎月"];
-  if (fixedCostKeywords.some(k => tLower.includes(k))) {
-    txnType = "fixed_cost";
-    // カテゴリ推定
+  // ユーザー明示指定がない場合のみ、キーワードベースで判定
+  if (!userOverride) {
+    // 収入キーワード
+    const incomeKeywords = ["給料", "給与", "ボーナス", "収入", "振込", "売上", "報酬"];
+    if (incomeKeywords.some(k => t.includes(k))) {
+      txnType = "income";
+      category = "収入";
+    }
+
+    // 固定費キーワード
+    const fixedCostKeywords = ["家賃", "住宅ローン", "光熱費", "電気代", "ガス代", "水道代", "通信費", "携帯", "スマホ", "インターネット", "wifi", "保険", "サブスク", "netflix", "spotify", "定額", "毎月"];
+    if (fixedCostKeywords.some(k => tLower.includes(k))) {
+      txnType = "fixed_cost";
+    }
+  }
+
+  // カテゴリ推定（txnTypeに基づく）
+  if (txnType === "fixed_cost" && !category) {
     if (t.includes("家賃") || t.includes("住宅ローン")) category = "住居費";
     else if (t.includes("電気") || t.includes("ガス") || t.includes("水道") || t.includes("光熱")) category = "光熱費";
     else if (t.includes("通信") || t.includes("携帯") || t.includes("スマホ") || tLower.includes("wifi") || t.includes("インターネット")) category = "通信費";
