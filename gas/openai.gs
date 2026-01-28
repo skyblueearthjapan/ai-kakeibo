@@ -543,7 +543,7 @@ function callAiJson_(messages, schemaHint, traceId) {
  * @return {string} "openai" or "gemini"
  */
 function getAiProvider_() {
-  const cfg = getConfigFromSheet_();
+  const cfg = getConfigKV_();
   const provider = String(cfg.AI_PROVIDER || "").toLowerCase().trim();
   if (provider === "gemini") return "gemini";
 
@@ -563,8 +563,8 @@ function getGeminiApiKey_() {
   const pv = props.getProperty("GEMINI_API_KEY");
   if (pv) return pv.trim();
 
-  // 00_Config シート
-  const cfg = getConfigFromSheet_();
+  // 01_SettingsKV シート
+  const cfg = getConfigKV_();
   if (cfg.GEMINI_API_KEY) return String(cfg.GEMINI_API_KEY).trim();
 
   return "";
@@ -574,7 +574,7 @@ function getGeminiApiKey_() {
  * Geminiモデル名を取得
  */
 function getGeminiModel_() {
-  const cfg = getConfigFromSheet_();
+  const cfg = getConfigKV_();
   const model = cfg.GEMINI_MODEL ||
                 PropertiesService.getScriptProperties().getProperty("GEMINI_MODEL") ||
                 "gemini-1.5-flash";
