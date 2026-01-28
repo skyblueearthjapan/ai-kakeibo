@@ -419,3 +419,197 @@ function truncate_(s, n) {
   if (s.length <= n) return s;
   return s.slice(0, n) + "...";
 }
+
+/** ========== Gemini API Support ========== */
+
+/**
+ * Gemini APIを呼び出し、JSONを返す
+ * @param {Array} messages OpenAI形式のメッセージ [{role,content},...]
+ * @param {Object} schemaHint 期待するJSONの形式
+ * @param {string} traceId
+ * @return {Object} パースされたJSON
+ */
+function callGeminiJson_(messages, schemaHint, traceId) {
+  const apiKey = getGeminiApiKey_();
+  if (!apiKey) {
+    throw makeAppError_("E_AI_KEY_MISSING", "GEMINI_API_KEY missing", traceId, false,
+      "Gemini APIキーが未設定です。設定を確認してください。");
+  }
+
+  const model = getGeminiModel_();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  // OpenAI形式のメッセージをGemini形式に変換
+  const contents = convertToGeminiFormat_(messages);
+
+  const payload = {
+    contents: contents,
+    generationConfig: {
+      temperature: 0.2,
+      responseMimeType: "application/json"
+    }
+  };
+
+  const res = UrlFetchApp.fetch(url, {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  const code = res.getResponseCode();
+  const text = res.getContentText();
+
+  if (code >= 400) {
+    throw makeAppError_("E_AI_CALL_FAILED", `Gemini error ${code}: ${text}`, traceId, true,
+      "Gemini呼び出しに失敗しました。しばらくしてから再度お試しください。");
+  }
+
+  const json = JSON.parse(text);
+
+  // Geminiのレスポンス形式からテキストを抽出
+  const content = json.candidates &&
+                  json.candidates[0] &&
+                  json.candidates[0].content &&
+                  json.candidates[0].content.parts &&
+                  json.candidates[0].content.parts[0] &&
+                  json.candidates[0].content.parts[0].text;
+
+  if (!content) {
+    throw makeAppError_("E_AI_EMPTY", "Empty Gemini response", traceId, true, "Geminiの応答が空でした。");
+  }
+
+  const parsed = safeParseJsonFromText_(content);
+  if (!parsed) {
+    throw makeAppError_("E_AI_PARSE_FAILED", "Failed to parse JSON from Gemini response: " + content, traceId, true,
+      "Geminiの結果解析に失敗しました。");
+  }
+  return parsed;
+}
+
+/**
+ * OpenAI形式のメッセージをGemini形式に変換
+ */
+function convertToGeminiFormat_(messages) {
+  const contents = [];
+  let systemInstruction = "";
+
+  for (const msg of messages) {
+    if (msg.role === "system") {
+      // Geminiではsystem instructionは別扱い、またはuserの最初に含める
+      systemInstruction = msg.content;
+    } else if (msg.role === "user") {
+      // systemがあれば、最初のuserメッセージに含める
+      let text = msg.content;
+      if (systemInstruction && contents.length === 0) {
+        text = systemInstruction + "\n\n" + text;
+        systemInstruction = "";
+      }
+      contents.push({
+        role: "user",
+        parts: [{ text: text }]
+      });
+    } else if (msg.role === "assistant") {
+      contents.push({
+        role: "model",
+        parts: [{ text: msg.content }]
+      });
+    }
+  }
+
+  return contents;
+}
+
+/**
+ * 統合AI呼び出し関数（プロバイダーに応じて切り替え）
+ * @param {Array} messages [{role,content},...]
+ * @param {Object} schemaHint 期待するJSONの形式
+ * @param {string} traceId
+ * @return {Object} パースされたJSON
+ */
+function callAiJson_(messages, schemaHint, traceId) {
+  const provider = getAiProvider_();
+
+  if (provider === "gemini") {
+    return callGeminiJson_(messages, schemaHint, traceId);
+  } else {
+    // デフォルトはOpenAI
+    return callOpenAiJson_(messages, schemaHint, traceId);
+  }
+}
+
+/**
+ * AIプロバイダーを取得
+ * @return {string} "openai" or "gemini"
+ */
+function getAiProvider_() {
+  const cfg = getConfigFromSheet_();
+  const provider = String(cfg.AI_PROVIDER || "").toLowerCase().trim();
+  if (provider === "gemini") return "gemini";
+
+  // Script Propertiesもチェック
+  const propProvider = PropertiesService.getScriptProperties().getProperty("AI_PROVIDER");
+  if (propProvider && propProvider.toLowerCase().trim() === "gemini") return "gemini";
+
+  return "openai"; // デフォルト
+}
+
+/**
+ * Gemini APIキーを取得
+ */
+function getGeminiApiKey_() {
+  // Script Properties優先
+  const props = PropertiesService.getScriptProperties();
+  const pv = props.getProperty("GEMINI_API_KEY");
+  if (pv) return pv.trim();
+
+  // 00_Config シート
+  const cfg = getConfigFromSheet_();
+  if (cfg.GEMINI_API_KEY) return String(cfg.GEMINI_API_KEY).trim();
+
+  return "";
+}
+
+/**
+ * Geminiモデル名を取得
+ */
+function getGeminiModel_() {
+  const cfg = getConfigFromSheet_();
+  const model = cfg.GEMINI_MODEL ||
+                PropertiesService.getScriptProperties().getProperty("GEMINI_MODEL") ||
+                "gemini-1.5-flash";
+  return model;
+}
+
+/**
+ * いずれかのAI APIキーが設定されているかチェック
+ * プロバイダー設定に応じて適切なキーをチェック
+ */
+function hasAnyAiApiKey_() {
+  const provider = getAiProvider_();
+  if (provider === "gemini") {
+    return !!getGeminiApiKey_();
+  } else {
+    return !!getOpenAiApiKey_();
+  }
+}
+
+/**
+ * 現在のAI設定情報を返す（デバッグ用）
+ */
+function getAiProviderInfo_() {
+  const provider = getAiProvider_();
+  if (provider === "gemini") {
+    return {
+      provider: "gemini",
+      model: getGeminiModel_(),
+      hasKey: !!getGeminiApiKey_()
+    };
+  } else {
+    return {
+      provider: "openai",
+      model: getOpenAiModel_(),
+      hasKey: !!getOpenAiApiKey_()
+    };
+  }
+}

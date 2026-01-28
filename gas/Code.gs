@@ -1008,29 +1008,16 @@ function getUiMasterData() {
  */
 function debugAiStatus() {
   const traceId = makeTraceId_();
-  const key = getOpenAiApiKey_();
   const enabled = isAiEnabled_();
-
-  let source = "none";
-  const propsKey = PropertiesService.getScriptProperties().getProperty("OPENAI_API_KEY");
-  if (propsKey) {
-    source = "props";
-  } else {
-    const cfg = getConfigKV_();
-    if (cfg.OPENAI_API_KEY) {
-      source = "settings_kv";
-    } else {
-      source = "settings_cell_or_none";
-    }
-  }
+  const providerInfo = getAiProviderInfo_();
 
   return {
     ok: true,
     result: {
       aiEnabled: enabled,
-      hasKey: !!key,
-      keySource: source,
-      modelText: getOpenAiModel_(),
+      provider: providerInfo.provider,
+      model: providerInfo.model,
+      hasKey: providerInfo.hasKey,
       traceId
     }
   };
@@ -1049,8 +1036,8 @@ function processSmartInput(text, clientContext) {
   try {
     const ui = getUiMasterData().result;
 
-    // AI usable?
-    const canAi = isAiEnabled_() && !!getOpenAiApiKey_();
+    // AI usable? (OpenAIまたはGeminiのAPIキーがあればOK)
+    const canAi = isAiEnabled_() && hasAnyAiApiKey_();
 
     let draft;
     if (canAi) {
@@ -1163,7 +1150,7 @@ function aiDraftFromText_(text, ui, traceId) {
     { role: "user", content: JSON.stringify(user) }
   ];
 
-  const parsed = callOpenAiJson_(messages, schemaHint, traceId);
+  const parsed = callAiJson_(messages, schemaHint, traceId);
 
   // txn_type正規化
   let txnType = String(parsed.txn_type || "expense").toLowerCase();
