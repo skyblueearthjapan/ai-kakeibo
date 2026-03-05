@@ -514,6 +514,14 @@
           return;
         }
         LAST_AI_DRAFT = res.result.draft;
+
+        // 精算取引の場合、精算モーダルを表示
+        if (res.result.settlement) {
+          pushChat_("ai", "カード精算を認識しました。内容を確認してください。");
+          showSettlementModal(res.result.settlement);
+          return;
+        }
+
         showAiPreview_(LAST_AI_DRAFT, res.result.aiUsed);
         pushChat_("ai", buildAiSummary_(LAST_AI_DRAFT));
       })
@@ -2181,5 +2189,133 @@
         console.error("Failed to reload master dropdowns:", e);
       })
       .getUiMasterData();
+  }
+
+  /* ========== カード精算処理 ========== */
+
+  /**
+   * 精算確認モーダルを表示
+   */
+  function showSettlementModal(settlementData) {
+    const modal = $("settlementModal");
+    if (!modal) return;
+
+    const { card_name, requested_amount, unsettled_items, unsettled_total, difference } = settlementData;
+
+    // カード名
+    $("settlementCardName").textContent = card_name + " の精算";
+    $("settlementCardNameHidden").value = card_name;
+
+    // 金額
+    $("settlementRequestedAmount").textContent = "¥" + requested_amount.toLocaleString();
+    $("settlementRecordedTotal").textContent = "¥" + unsettled_total.toLocaleString();
+    $("settlementAmountHidden").value = requested_amount;
+    $("settlementDateHidden").value = getTodayISO_();
+
+    // 差額
+    const diffEl = $("settlementDifference");
+    const diffRow = diffEl.closest(".settlement-diff");
+    if (Math.abs(difference) < 1) {
+      diffEl.textContent = "¥0（ぴったり一致）";
+      diffRow.classList.remove("positive", "negative");
+      $("settlementDiffAction").style.display = "none";
+    } else if (difference > 0) {
+      diffEl.textContent = "+¥" + difference.toLocaleString() + "（未記帳分）";
+      diffRow.classList.add("positive");
+      diffRow.classList.remove("negative");
+      $("settlementDiffAction").style.display = "block";
+    } else {
+      diffEl.textContent = "¥" + difference.toLocaleString() + "（記録が多い）";
+      diffRow.classList.add("negative");
+      diffRow.classList.remove("positive");
+      $("settlementDiffAction").style.display = "none";
+    }
+
+    // 明細件数
+    $("settlementItemCount").textContent = unsettled_items.length;
+
+    // 明細一覧
+    const listEl = $("settlementItemList");
+    if (unsettled_items.length === 0) {
+      listEl.innerHTML = '<div class="settlement-empty">未精算の明細がありません</div>';
+    } else {
+      listEl.innerHTML = unsettled_items.map(item => `
+        <div class="settlement-item">
+          <div class="settlement-item-left">
+            <span class="settlement-item-date">${item.date || "日付不明"}</span>
+            <span class="settlement-item-merchant">${item.merchant || item.item || "（明細）"}</span>
+          </div>
+          <span class="settlement-item-amount">¥${item.amount.toLocaleString()}</span>
+        </div>
+      `).join("");
+    }
+
+    modal.style.display = "flex";
+  }
+
+  /**
+   * 精算確認モーダルを閉じる
+   */
+  function closeSettlementModal() {
+    const modal = $("settlementModal");
+    if (modal) modal.style.display = "none";
+  }
+
+  /**
+   * 精算を確定
+   */
+  function confirmSettlement() {
+    const cardName = $("settlementCardNameHidden").value;
+    const settledAmount = Number($("settlementAmountHidden").value) || 0;
+    const settledDate = $("settlementDateHidden").value || getTodayISO_();
+    const recordDifference = $("recordDifference")?.checked || false;
+
+    const btn = $("btnConfirmSettlement");
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "処理中...";
+    }
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "精算を確定";
+        }
+
+        if (!res || !res.success) {
+          alert("精算処理に失敗しました: " + (res?.message || "エラー"));
+          return;
+        }
+
+        closeSettlementModal();
+        pushChat_("ai", res.message);
+        setHomeStatus("精算が完了しました！");
+
+        // 履歴を更新
+        clearCache_();
+      })
+      .withFailureHandler((e) => {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "精算を確定";
+        }
+        alert("エラー: " + (e?.message || String(e)));
+      })
+      .processSettlement(cardName, settledAmount, settledDate, {
+        recordDifference: recordDifference,
+        differenceCategory: "その他"
+      });
+  }
+
+  /**
+   * 結果に精算情報が含まれている場合、精算モーダルを表示
+   */
+  function checkAndShowSettlement_(res) {
+    if (res && res.ok && res.result && res.result.settlement) {
+      showSettlementModal(res.result.settlement);
+      return true;
+    }
+    return false;
   }
 </script>

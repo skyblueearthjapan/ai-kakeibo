@@ -119,7 +119,9 @@ function rowToObject_(row, idxMap) {
     confidence: Number(row[idxMap["confidence"]]) || 0,
     receipt_file_id: safeStr_(row[idxMap["receipt_file_id"]]),
     raw_text: safeStr_(row[idxMap["raw_text"]]),
-    status: safeStr_(row[idxMap["status"]])
+    status: safeStr_(row[idxMap["status"]]),
+    settlement_status: safeStr_(row[idxMap["settlement_status"]]),
+    card_name: safeStr_(row[idxMap["card_name"]])
   };
 }
 

@@ -241,7 +241,7 @@ function makeOkResult_(mappedRow, appendedId, startedMs) {
 
   delete mappedRow.__clarification_questions;
 
-  return {
+  const result = {
     ok: true,
     result: {
       transaction: mappedRow,
@@ -250,6 +250,20 @@ function makeOkResult_(mappedRow, appendedId, startedMs) {
       meta: { duration_ms: durationMs }
     }
   };
+
+  // 精算取引の場合、未精算明細情報を追加
+  if (mappedRow.type === "settlement" && mappedRow.card_name) {
+    const unsettled = getUnsettledByCard(mappedRow.card_name);
+    result.result.settlement = {
+      card_name: mappedRow.card_name,
+      requested_amount: mappedRow.amount,
+      unsettled_items: unsettled.items,
+      unsettled_total: unsettled.total,
+      difference: mappedRow.amount - unsettled.total
+    };
+  }
+
+  return result;
 }
 
 /**
@@ -1052,7 +1066,20 @@ function processSmartInput(text, clientContext) {
 
     logSuccess_(traceId, "processSmartInput", Date.now() - started, { aiUsed: canAi });
 
-    return { ok: true, result: { draft, traceId, aiUsed: canAi } };
+    // settlement（精算）の場合、未精算明細を取得
+    let settlement = null;
+    if (draft.txn_type === "settlement" && draft.card_name) {
+      const unsettled = getUnsettledByCard(draft.card_name);
+      settlement = {
+        card_name: draft.card_name,
+        requested_amount: draft.amount,
+        unsettled_items: unsettled.items || [],
+        unsettled_total: unsettled.total || 0,
+        difference: draft.amount - (unsettled.total || 0)
+      };
+    }
+
+    return { ok: true, result: { draft, traceId, aiUsed: canAi, settlement } };
 
   } catch (e) {
     logError_(traceId, "processSmartInput", Date.now() - started, normalizeError_(e, traceId).code, String(e), {});
@@ -1075,12 +1102,13 @@ function aiDraftFromText_(text, ui, traceId) {
 
   const schemaHint = {
     occurred_at: "YYYY-MM-DD (発生日。月のみなら月初1日)",
-    txn_type: "expense | income | fixed_cost",
+    txn_type: "expense | income | fixed_cost | settlement",
     title: "取引タイトル（必須。店名/内容の短い説明）",
     amount: 0,
     merchant: "",
     category: "",
     payment_method: "",
+    card_name: "settlement時のみ: 正規化したカード名（楽天カード、JCBカード等）",
     memo: "短く整形したメモ",
     confidence: 0.0,
     needs_confirmation: true,
@@ -1125,6 +1153,13 @@ function aiDraftFromText_(text, ui, traceId) {
     "- expense: 通常の支出",
     "- income: 収入（給料、ボーナス）",
     "- fixed_cost: 固定費（家賃、光熱費、通信費）",
+    "- settlement: クレジットカード精算（「請求」「お支払い」「引き落とし」がある場合）",
+    "",
+    "### settlement判定",
+    "- 「請求」「お支払い」「引き落とし」「まとめて請求」「精算」のいずれかがあり、店名/商品名がない場合",
+    "- 例: '楽天カードの請求が来てお支払い、3万円' → txn_type: settlement, card_name: '楽天カード'",
+    "- 例: 'JCBカードの引き落とし25000円' → txn_type: settlement, card_name: 'JCBカード'",
+    "- settlement時は card_name に正規化したカード名を設定すること",
     "",
     "### occurred_at",
     "- Default: '" + today + "'",
@@ -1153,12 +1188,12 @@ function aiDraftFromText_(text, ui, traceId) {
 
   // txn_type正規化
   let txnType = String(parsed.txn_type || "expense").toLowerCase();
-  if (!["expense", "income", "fixed_cost"].includes(txnType)) {
+  if (!["expense", "income", "fixed_cost", "settlement"].includes(txnType)) {
     txnType = "expense";
   }
 
-  // type: Transactionsシートのtype列用（expense or income）
-  const sheetType = (txnType === "income") ? "income" : "expense";
+  // type: Transactionsシートのtype列用（expense or income or settlement）
+  const sheetType = (txnType === "income") ? "income" : (txnType === "settlement") ? "settlement" : "expense";
 
   // 発生日の処理（occurred_at優先、なければ今日）
   let occurredAt = String(parsed.occurred_at || parsed.date || today).slice(0, 10);
@@ -1180,13 +1215,14 @@ function aiDraftFromText_(text, ui, traceId) {
 
   return {
     date: occurredAt,           // 発生日を使用
-    txn_type: txnType,          // AI判定結果（expense/income/fixed_cost）
-    type: sheetType,            // シート保存用（expense/income）
+    txn_type: txnType,          // AI判定結果（expense/income/fixed_cost/settlement）
+    type: sheetType,            // シート保存用（expense/income/settlement）
     title: title,               // タイトル（必須）
     amount: Number(parsed.amount || 0),
     merchant: String(parsed.merchant || title),  // merchantが空ならtitleを使用
     category: String(parsed.category || ""),
     payment_method: String(parsed.payment_method || ""),
+    card_name: String(parsed.card_name || ""),  // settlement時のカード名
     memo: String(parsed.memo || ""),
     raw_text: text,
     confidence: Number(parsed.confidence || 0.4),

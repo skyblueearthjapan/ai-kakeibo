@@ -1416,4 +1416,131 @@
     background: rgba(17, 24, 39, 0.08);
     color: var(--muted);
   }
+
+  /* ===== 精算確認モーダル ===== */
+  .settlement-card-name {
+    font-size: 18px;
+    font-weight: 700;
+    text-align: center;
+    padding: 12px;
+    background: var(--blue);
+    border-radius: 8px;
+    margin-bottom: 16px;
+  }
+
+  .settlement-summary {
+    background: #f9fafb;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 16px;
+  }
+
+  .settlement-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .settlement-row:last-child {
+    border-bottom: none;
+  }
+
+  .settlement-label {
+    color: var(--muted);
+  }
+
+  .settlement-value {
+    font-weight: 600;
+  }
+
+  .settlement-diff {
+    background: #fef3c7;
+    margin: 8px -12px -12px;
+    padding: 12px;
+    border-radius: 0 0 8px 8px;
+  }
+
+  .settlement-diff .settlement-value {
+    color: #d97706;
+  }
+
+  .settlement-diff.positive .settlement-value {
+    color: #dc2626;
+  }
+
+  .settlement-diff.negative .settlement-value {
+    color: #059669;
+  }
+
+  .settlement-detail-header {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .settlement-item-list {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    margin-bottom: 16px;
+  }
+
+  .settlement-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 14px;
+  }
+
+  .settlement-item:last-child {
+    border-bottom: none;
+  }
+
+  .settlement-item-left {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .settlement-item-date {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .settlement-item-merchant {
+    font-weight: 500;
+  }
+
+  .settlement-item-amount {
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .settlement-diff-action {
+    background: #fff7ed;
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 12px;
+  }
+
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  .checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+  }
+
+  .settlement-empty {
+    text-align: center;
+    padding: 20px;
+    color: var(--muted);
+  }
 </style>

@@ -429,6 +429,51 @@
     </div>
   </div>
 
+  <!-- 精算確認モーダル -->
+  <div id="settlementModal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>カード精算確認</h3>
+        <button class="modal-close" onclick="closeSettlementModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="settlementCardName" class="settlement-card-name"></div>
+        <div class="settlement-summary">
+          <div class="settlement-row">
+            <span class="settlement-label">請求額</span>
+            <span id="settlementRequestedAmount" class="settlement-value">¥0</span>
+          </div>
+          <div class="settlement-row">
+            <span class="settlement-label">記録済み合計</span>
+            <span id="settlementRecordedTotal" class="settlement-value">¥0</span>
+          </div>
+          <div class="settlement-row settlement-diff">
+            <span class="settlement-label">差額</span>
+            <span id="settlementDifference" class="settlement-value">¥0</span>
+          </div>
+        </div>
+
+        <div class="settlement-detail-header">未精算の明細（<span id="settlementItemCount">0</span>件）</div>
+        <div id="settlementItemList" class="settlement-item-list"></div>
+
+        <div id="settlementDiffAction" class="settlement-diff-action" style="display:none;">
+          <label class="checkbox-label">
+            <input type="checkbox" id="recordDifference" checked>
+            差額を「その他」として記録する
+          </label>
+        </div>
+
+        <input type="hidden" id="settlementCardNameHidden">
+        <input type="hidden" id="settlementAmountHidden">
+        <input type="hidden" id="settlementDateHidden">
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary" onclick="closeSettlementModal()">キャンセル</button>
+        <button id="btnConfirmSettlement" class="btn primary" onclick="confirmSettlement()">精算を確定</button>
+      </div>
+    </div>
+  </div>
+
   <!-- マスタ編集モーダル -->
   <div id="masterModal" class="modal" style="display:none;">
     <div class="modal-content modal-large">

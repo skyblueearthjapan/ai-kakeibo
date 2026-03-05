@@ -67,6 +67,8 @@ OpenAI（受付AI）が返す **TransactionAI JSON** を、Googleスプレッド
 | O | receipt_file_id |
 | P | raw_text |
 | Q | status |
+| R | settlement_status |
+| S | card_name |
 
 ---
 
@@ -91,6 +93,8 @@ OpenAI（受付AI）が返す **TransactionAI JSON** を、Googleスプレッド
 | O receipt_file_id | GAS指定 | レシート保存する場合のみ Drive fileId |
 | P raw_text | 入力元 | テキスト入力 or (receipt) 等の固定値 + OCR要約でも可 |
 | Q status | ルール | status判定ロジック（後述） |
+| R settlement_status | ルール | カード払い時 = "unsettled"、現金/即時決済 = ""、精算後 = "settled" |
+| S card_name | payment_method | カード名を正規化（楽天カード、JCBカード等） |
 
 ---
 

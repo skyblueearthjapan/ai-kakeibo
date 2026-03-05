@@ -285,11 +285,22 @@ function buildSystemPrompt_() {
     "ユーザー入力（テキスト/レシート画像）から「1件の取引」を抽出し、指定JSON Schemaに厳密に従って返してください。",
     "",
     "- 日付は YYYY-MM-DD。不明なら空文字にする。",
-    "- 取引種別は txn_type=expense/income/transfer。",
+    "- 取引種別は txn_type=expense/income/transfer/settlement。",
     "- amountは数値（常に正の数）。支出か収入かは txn_type で区別する。",
     "- カテゴリは一般的な家計簿の大分類から選ぶ（例：食費/日用品/住居/光熱費/通信/交通/医療/教育/娯楽/美容・衣服/交際/子ども/貯蓄・投資/特別費/収入/その他）。",
     "- 不明点がある場合は needs_clarification=true にし、clarification_questions に短い質問を入れる。",
     "- 迷った場合は confidence を低めに設定する。",
+    "",
+    "【クレジットカード精算の判定】",
+    "以下のキーワードがあり、かつ店名・商品名がない場合は txn_type=settlement（カード精算）として扱う：",
+    "- 「請求」「お支払い」「引き落とし」「まとめて請求」「精算」",
+    "例：「楽天カードの請求が来てお支払いです、3万円」→ settlement",
+    "例：「JCBカードの引き落とし、25000円」→ settlement",
+    "",
+    "通常のカード利用（店名・商品名あり）は expense として扱う：",
+    "例：「ガソリンをJCBカードで2000円」→ expense（settlement_statusはunsettled）",
+    "",
+    "settlement の場合は card_name にカード名を正規化して入れる（楽天カード、JCBカード等）。",
     "",
     "注意：Spreadsheet列名typeと衝突しないよう、JSONは txn_type を用いる。"
   ].join("\n");
@@ -302,7 +313,7 @@ function getTransactionAiSchema_() {
     properties: {
       type: { type: "string", enum: ["transaction", "unknown"] },
       date: { type: "string", description: "YYYY-MM-DD or empty" },
-      txn_type: { type: "string", enum: ["expense", "income", "transfer"] },
+      txn_type: { type: "string", enum: ["expense", "income", "transfer", "settlement"] },
       account: { type: "string" },
       merchant: { type: "string" },
       item: { type: "string" },
@@ -314,11 +325,12 @@ function getTransactionAiSchema_() {
       tags: { type: "array", items: { type: "string" } },
       confidence: { type: "number", minimum: 0, maximum: 1 },
       needs_clarification: { type: "boolean" },
-      clarification_questions: { type: "array", items: { type: "string" } }
+      clarification_questions: { type: "array", items: { type: "string" } },
+      card_name: { type: "string", description: "正規化されたカード名（精算時に使用）" }
     },
     required: [
       "type", "date", "txn_type", "account", "merchant", "item", "category", "subcategory",
-      "payment_method", "amount", "memo", "tags", "confidence", "needs_clarification", "clarification_questions"
+      "payment_method", "amount", "memo", "tags", "confidence", "needs_clarification", "clarification_questions", "card_name"
     ]
   };
 }

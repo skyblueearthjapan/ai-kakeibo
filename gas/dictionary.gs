@@ -24,8 +24,13 @@ function mapAiToRow_(ai, ctx) {
     receipt_file_id: ctx.receiptFileId || "",
     raw_text: ctx.rawText || "",
     status: "",
+    settlement_status: "",
+    card_name: "",
     __clarification_questions: Array.isArray(ai.clarification_questions) ? ai.clarification_questions : []
   };
+
+  // カード精算情報を設定
+  setCardSettlementInfo_(mapped, ai);
 
   // 辞書補正（02_Categories）
   const corrected = applyCategoryDictionary_(mapped);

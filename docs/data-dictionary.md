@@ -37,6 +37,8 @@ Last Updated: 2026-01-09 (Asia/Tokyo)
 | O | receipt_file_id | string | 1a2b3c... | Drive fileId |
 | P | raw_text | string | 昨日 スタバ 620円 | 監査用 |
 | Q | status | enum | confirmed | confirmed/pending/needs_review |
+| R | settlement_status | enum | unsettled | unsettled/settled（カード払いの精算状態） |
+| S | card_name | string | 楽天カード | 正規化されたカード名（精算紐付け用） |
 
 ---
 
@@ -85,6 +87,25 @@ Last Updated: 2026-01-09 (Asia/Tokyo)
 - confirmed: 必須項目が揃い、confidence基準を満たす
 - pending: date/amount/category等が欠ける
 - needs_review: confidence低い/異常値/矛盾
+
+### 3.5 クレジットカード精算（settlement）
+
+カード払いの二重計上を防ぐための精算機能。
+
+**フロー**:
+1. カード払い時：`settlement_status=unsettled`、`card_name=カード名` を設定
+2. 月末に「楽天カードの請求が来てお支払い、3万円」と入力
+3. AIが「請求」「お支払い」などのキーワードから `txn_type=settlement` と判定
+4. 未精算明細を検索して差額を計算
+5. ユーザー確認後、対象明細の `settlement_status` を `settled` に更新
+6. 差額がある場合は「精算差額」として記録可能
+
+**キーワード（精算と判定）**:
+- 「請求」「お支払い」「引き落とし」「まとめて請求」「精算」
+
+**例**:
+- 通常利用: 「ガソリンをJCBカードで2000円」→ expense, unsettled
+- 精算時: 「JCBカードの引き落とし、25000円」→ settlement
 
 ---
 
